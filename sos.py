@@ -2,7 +2,7 @@ import razorpay
 from flask import Flask, request
 import telebot
 
-TOKEN = '8203717604:AAEfV8Sswl-eJ1F4g3vrAJGi2d-ZGcO-zF4'
+TOKEN = '8203717604:AAFToIEk11Le36Dg8pKxGSrLqH_bwlconJA'
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
@@ -82,7 +82,7 @@ from flask import Flask
 from threading import Thread
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8203717604:AAEfV8Sswl-eJ1F4g3vrAJGi2d-ZGcO-zF4"          
+BOT_TOKEN = "8203717604:AAFToIEk11Le36Dg8pKxGSrLqH_bwlconJA"          
 SMM_API_URL = "https://smmwiz.com/api/v2"  
 SMM_API_KEY = "d0ee8a3432a6770f9a6003181d308d72"        
 
