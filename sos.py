@@ -61,7 +61,6 @@ def home():
     return "SMM Bot with Razorpay is running!"
 
 if __name__ == '__main__':
-if __name__ == '__main__':
     import threading
     def run_flask():
         app.run(host='0.0.0.0', port=10000)
