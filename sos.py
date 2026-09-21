@@ -7,7 +7,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # Razorpay Client (Yahan apni Test ya Live Key ID aur Secret dalein)
-razorpay_client = razorpay.Client(auth=("YOUR_KEY_ID", "YOUR_KEY_SECRET"))
+razorpay_client = razorpay.Client(auth=("rzp_test_TeqKl9A9tWKnZI", "wLcq7AuD25CXDasBXn1teMAg"))
 
 # Step 1: User jab /addfunds dabaye
 @bot.message_handler(commands=['addfunds'])
