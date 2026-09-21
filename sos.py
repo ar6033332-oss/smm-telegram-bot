@@ -72,9 +72,7 @@ bot.remove_webhook()
 
 # Bot polling start karein
 bot.infinity_polling()
-
-    bot.infinity_polling()
-
+bot.infinity_polling()
 
 import telebot
 from telebot import types
