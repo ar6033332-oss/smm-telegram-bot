@@ -9,14 +9,14 @@ from flask import Flask
 from threading import Thread
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "APNA_BOT_TOKEN_YAHAN_DAALEIN"          
-SMM_API_URL = "YOUR_SMM_API_URL"  
-SMM_API_KEY = "YOUR_SMM_API_KEY"        
+BOT_TOKEN = "8203717604:AAEfV8Sswl-eJ1F4g3vrAJGi2d-ZGcO-zF4"          
+SMM_API_URL = "https://smmwiz.com/api/v2"  
+SMM_API_KEY = "d0ee8a3432a6770f9a6003181d308d72"        
 
 ADMIN_ID = YOUR_ADMIN_ID_NUMBER                           # Jaise: 123456789
-UPI_ID = "yourname@upi"                        
-QR_CODE_URL = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=yourname@upi&pn=SMM_Services"
-ADMIN_USERNAME = "@YourAdminUsername"           
+UPI_ID = "arshad79@ptyes"                        
+QR_CODE_URL = "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
+ADMIN_USERNAME = "@@Socialpookiehelp"           
 # =======================================================
 
 bot = telebot.TeleBot(BOT_TOKEN)
