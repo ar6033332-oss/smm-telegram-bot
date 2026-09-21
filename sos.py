@@ -1,3 +1,76 @@
+import razorpay
+from flask import Flask, request
+import telebot
+
+TOKEN = 'APNA_TELEGRAM_BOT_TOKEN'
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
+
+# Razorpay Client (Yahan apni Test ya Live Key ID aur Secret dalein)
+razorpay_client = razorpay.Client(auth=("YOUR_KEY_ID", "YOUR_KEY_SECRET"))
+
+# Step 1: User jab /addfunds dabaye
+@bot.message_handler(commands=['addfunds'])
+def ask_amount(message):
+    msg = bot.reply_to(message, "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10 hona chahiye)")
+    # Agla message user ka amount hoga, isliye use process_amount function par bhej rahe hain
+    bot.register_next_step_handler(msg, process_payment_amount)
+
+# Step 2: User dwara bheja gaya amount check karna aur link banana
+def process_payment_amount(message):
+    try:
+        user_input = message.text.strip()
+        amount_rs = float(user_input)
+        
+        # Minimum amount validation (₹10)
+        if amount_rs < 10:
+            bot.reply_to(message, "❌ Minimum amount ₹10 hai. Kripya ₹10 ya usse zyada enter karein. Dubara koshish karne ke liye /addfunds dabayein.")
+            return
+
+        # Amount ko paise me convert karna (Jaise ₹10 = 1000 paise)
+        amount_paise = int(amount_rs * 100)
+
+        # Razorpay payment link data
+        data = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "accept_partial": False,
+            "description": f"Add ₹{amount_rs} to SMM Bot Wallet",
+            "customer": {
+                "name": str(message.from_user.first_name),
+                "contact": "9876543210",
+                "email": "user@example.com"
+            },
+            "notify": {"sms": False, "email": False},
+            "notes": {"telegram_user_id": str(message.from_user.id)}
+        }
+        
+        # Razorpay se link generate karein
+        payment_link = razorpay_client.payment_link.create(data)
+        short_url = payment_link.get('short_url')
+        
+        bot.reply_to(message, f"💳 **Aapka payment link taiyar hai:**\n\n🔗 {short_url}\n\n*Payment poori karne ke baad aapka balance update ho jayega.*")
+    
+    except ValueError:
+        bot.reply_to(message, "❌ Kripya sirf valid number enter karein (jaise: 50, 100). Dubara try karne ke liye /addfunds dabayein.")
+    except Exception as e:
+        bot.reply_to(message, f"Kuch error aa gaya: {str(e)}")
+
+@app.route('/')
+def home():
+    return "SMM Bot with Razorpay is running!"
+
+if __name__ == '__main__':
+    import threading
+    def run_flask():
+        app.run(host='0.0.0.0', port=10000)
+    
+    t = threading.Thread(target=run_flask)
+    t.start()
+    
+    bot.infinity_polling()
+
+
 import telebot
 from telebot import types
 import requests
