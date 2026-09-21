@@ -61,18 +61,20 @@ def home():
     return "SMM Bot with Razorpay is running!"
 
 if __name__ == '__main__':
+if __name__ == '__main__':
     import threading
     def run_flask():
         app.run(host='0.0.0.0', port=10000)
     
     t = threading.Thread(target=run_flask)
     t.start()
+    
     # Purane webhook ko hatane ke liye taaki 409 error na aaye
-bot.remove_webhook()
+    bot.remove_webhook()
 
-# Bot polling start karein
-bot.infinity_polling()
-bot.infinity_polling()
+    # Bot polling start karein (sirf ek baar)
+    bot.infinity_polling()
+
 
 import telebot
 from telebot import types
