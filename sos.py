@@ -1,50 +1,41 @@
-import threading
-from flask import Flask
-
-app = Flask("")
-
-
-@app.route("/")
-def home():
-    return "Bot is active 24/7!"
-
-
-def run():
-    app.run(host="0.0.0.0", port=8080)
-
-
-def keep_alive():
-    t = threading.Thread(target=run)
-    t.start()
-
-
-# Web server ko start karna
-keep_alive()
-
-
-
-
 import telebot
 from telebot import types
 import requests
 import sqlite3
 import time
 from datetime import datetime
+import os
+from flask import Flask
+from threading import Thread
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8203717604:AAEfV8Sswl-eJ1F4g3vrAJGi2d-ZGcO-zF4"          
-SMM_API_URL = "https://smmwiz.com/api/v2"  
-SMM_API_KEY = "d0ee8a3432a6770f9a6003181d308d72"        
+BOT_TOKEN = "APNA_BOT_TOKEN_YAHAN_DAALEIN"          
+SMM_API_URL = "YOUR_SMM_API_URL"  
+SMM_API_KEY = "YOUR_SMM_API_KEY"        
 
-ADMIN_ID = 6658716591                           # Aapka Telegram User ID
-UPI_ID = "arshad79@ptyes"                        
-QR_CODE_URL = "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
-ADMIN_USERNAME = "@socialpookiehelp"           
+ADMIN_ID = YOUR_ADMIN_ID_NUMBER                           # Jaise: 123456789
+UPI_ID = "yourname@upi"                        
+QR_CODE_URL = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=yourname@upi&pn=SMM_Services"
+ADMIN_USERNAME = "@YourAdminUsername"           
 # =======================================================
 
 bot = telebot.TeleBot(BOT_TOKEN)
-
 user_order_state = {}
+
+# ================= FLASK SERVER FOR RENDER =================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is active and running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
 
 # ================= HELPER DATABASE FUNCTIONS =================
 def get_db_connection():
@@ -419,18 +410,14 @@ def process_qty(message):
             msg = bot.send_message(message.chat.id, "🔢 **Dobara Quantity dalein (sirf numbers):**")
             bot.register_next_step_handler(msg, process_qty)
 
-# Send restart alert to Admin
-try:
-    bot.send_message(ADMIN_ID, "🚀 **Bot Online!**\n\nPhone reboot/restart hone ke baad bot background me start ho gaya hai!", parse_mode="Markdown")
-except Exception as e:
-    print(f"Could not send restart alert: {e}")
-
-# Auto-restart loop for non-stop execution
-while True:
-    try:
-        print("Bot is running...")
-        bot.polling(non_stop=True, interval=1, timeout=60)
-    except Exception as e:
-        print(f"Network error: {e}. Retrying in 5 seconds...")
-        time.sleep(5)
-
+# ================= RUN MAIN THREADS =================
+if __name__ == '__main__':
+    keep_alive()
+    
+    while True:
+        try:
+            print("Bot is running...")
+            bot.polling(non_stop=True, interval=1, timeout=60)
+        except Exception as e:
+            print(f"Network error: {e}. Retrying in 5 seconds...")
+            time.sleep(5)
