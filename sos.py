@@ -2,7 +2,7 @@ import razorpay
 from flask import Flask, request
 import telebot
 
-TOKEN = 'APNA_TELEGRAM_BOT_TOKEN'
+TOKEN = '8203717604:AAEfV8Sswl-eJ1F4g3vrAJGi2d-ZGcO-zF4'
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
