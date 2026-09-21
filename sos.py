@@ -67,7 +67,12 @@ if __name__ == '__main__':
     
     t = threading.Thread(target=run_flask)
     t.start()
-    
+    # Purane webhook ko hatane ke liye taaki 409 error na aaye
+bot.remove_webhook()
+
+# Bot polling start karein
+bot.infinity_polling()
+
     bot.infinity_polling()
 
 
