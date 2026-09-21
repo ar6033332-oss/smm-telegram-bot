@@ -13,7 +13,7 @@ BOT_TOKEN = "8203717604:AAEfV8Sswl-eJ1F4g3vrAJGi2d-ZGcO-zF4"
 SMM_API_URL = "https://smmwiz.com/api/v2"  
 SMM_API_KEY = "d0ee8a3432a6770f9a6003181d308d72"        
 
-ADMIN_ID = YOUR_ADMIN_ID_NUMBER                           # Jaise: 123456789
+ADMIN_ID = 6658716591                           # Jaise: 123456789
 UPI_ID = "arshad79@ptyes"                        
 QR_CODE_URL = "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
 ADMIN_USERNAME = "@@Socialpookiehelp"           
