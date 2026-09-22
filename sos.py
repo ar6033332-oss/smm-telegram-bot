@@ -14,14 +14,14 @@ BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
 RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
 
 # XMedia SMM API Details
-SMM_API_URL = "https://xmediasmm.com/api/v2"
+SMM_API_URL = "https://xmediasmm.in/api/v2"
 SMM_API_KEY = "08a1a294cbd54b19bdb1e5cf3c2682dc"
 
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
 QR_CODE_URL = (
     "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
-              )
+)
 ADMIN_USERNAME = "@Socialpookiehelp"
 
 # Razorpay Credentials
@@ -97,8 +97,10 @@ def get_cached_smm_services():
           SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}
       )
       if response.status_code == 200:
-        cached_services = response.json()
-        last_fetch_time = current_time
+        res_data = response.json()
+        if isinstance(res_data, list):
+          cached_services = res_data
+          last_fetch_time = current_time
     except Exception as e:
       print("Error fetching services:", e)
   return cached_services
@@ -150,7 +152,10 @@ def get_profit_margin():
 
 
 def calculate_selling_price(wholesale_rate):
-  wholesale_rate = float(wholesale_rate)
+  try:
+    wholesale_rate = float(wholesale_rate)
+  except:
+    wholesale_rate = 0.0
   margin_percent = get_profit_margin()
   return round(
       wholesale_rate + (wholesale_rate * (margin_percent / 100.0)), 2
@@ -395,7 +400,7 @@ def callback_listener(call):
 # ==================== FLASK WEBAPP ROUTE ====================
 @app.route("/webapp")
 def webapp():
-  platform = request.args.get("platform", "instagram")
+  platform = request.args.get("platform", "instagram").lower()
 
   matched_services = []
   try:
@@ -404,6 +409,7 @@ def webapp():
       cat = s.get("category", "").lower()
       name = s.get("name", "").lower()
       match = False
+
       if platform == "ig_followers":
         if (
             "instagram" in cat
@@ -415,13 +421,25 @@ def webapp():
       else:
         if platform in cat or platform in name:
           match = True
+
       if match:
         selling_price = calculate_selling_price(s.get("rate", 0))
         matched_services.append({
             "service": s.get("service"),
             "name": f"{s.get('name')} - ₹{selling_price}/1K",
         })
+
+    # Fallback: Agar kisi filtering ki wajah se list khali reh jaye, toh saari services dikha do taaki blank na aaye
+    if not matched_services and services:
+      for s in services:
+        selling_price = calculate_selling_price(s.get("rate", 0))
+        matched_services.append({
+            "service": s.get("service"),
+            "name": f"{s.get('name')} - ₹{selling_price}/1K",
+        })
+
   except Exception as e:
+    print("Error in webapp:", e)
     matched_services = []
 
   html_template = """
