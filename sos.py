@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime
 from flask import Flask, render_template_string, request
 import psycopg2
@@ -12,14 +13,15 @@ from telebot import types
 BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
 RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
 
-SMM_API_URL = "https://xmediasmm.in/api/v2"
+# XMedia SMM API Details
+SMM_API_URL = "https://xmediasmm.com/api/v2"
 SMM_API_KEY = "08a1a294cbd54b19bdb1e5cf3c2682dc"
 
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
 QR_CODE_URL = (
     "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
-)
+              )
 ADMIN_USERNAME = "@Socialpookiehelp"
 
 # Razorpay Credentials
@@ -33,6 +35,11 @@ razorpay_client = razorpay.Client(
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 user_order_state = {}
+
+# Caching variables for fast loading
+cached_services = []
+last_fetch_time = 0
+CACHE_DURATION = 300  # 5 minutes cache
 
 MENU_BUTTONS = [
     "🛍 Select Platform",
@@ -81,6 +88,22 @@ init_db()
 
 
 # ==================== HELPER FUNCTIONS ====================
+def get_cached_smm_services():
+  global cached_services, last_fetch_time
+  current_time = time.time()
+  if not cached_services or (current_time - last_fetch_time) > CACHE_DURATION:
+    try:
+      response = requests.post(
+          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}
+      )
+      if response.status_code == 200:
+        cached_services = response.json()
+        last_fetch_time = current_time
+    except Exception as e:
+      print("Error fetching services:", e)
+  return cached_services
+
+
 def get_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
@@ -192,7 +215,6 @@ def addfunds_command(message):
   ask_amount_logic(message.chat.id, message.from_user.first_name)
 
 
-# --- Margin Command ---
 @bot.message_handler(commands=["setmargin"])
 def set_margin_command(message):
   user_id = message.from_user.id
@@ -370,19 +392,14 @@ def callback_listener(call):
     )
 
 
-# ==================== FLASK WEBAPP ROUTE (FIXED CORS & LOADING) ====================
+# ==================== FLASK WEBAPP ROUTE ====================
 @app.route("/webapp")
 def webapp():
   platform = request.args.get("platform", "instagram")
-  
-  # Server side se services fetch kar rahe hain taaki CORS error na aaye
+
   matched_services = []
   try:
-    response = requests.post(
-        SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}
-    )
-    services = response.json()
-    
+    services = get_cached_smm_services()
     for s in services:
       cat = s.get("category", "").lower()
       name = s.get("name", "").lower()
