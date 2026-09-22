@@ -3,8 +3,7 @@ import json
 import os
 import threading
 import time
-from urllib.parse import urlparse
-from flask import Flask, render_template_string, request
+from flask import Flask, request
 import psycopg2
 import razorpay
 import requests
@@ -38,10 +37,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 user_order_state = {}
 
-# Caching variables for fast loading
 cached_services = []
-last_fetch_time = 0
-CACHE_DURATION = 600  # 10 minutes cache
 
 MENU_BUTTONS = [
     "🛍 Select Platform",
@@ -51,7 +47,7 @@ MENU_BUTTONS = [
     "📞 Support",
 ]
 
-# ==================== DATABASE SETUP (POSTGRESQL / SUPABASE) ====================
+# ==================== DATABASE SETUP ====================
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
@@ -92,26 +88,38 @@ def init_db():
 init_db()
 
 
-# ==================== HELPER FUNCTIONS ====================
-def get_cached_smm_services():
-  global cached_services, last_fetch_time
-  current_time = time.time()
-  # Agar cache khali hai ya purana ho gaya hai
-  if not cached_services or (current_time - last_fetch_time) > CACHE_DURATION:
+# ==================== BACKGROUND SERVICE FETCHER ====================
+def fetch_services_background():
+  global cached_services
+  while True:
     try:
-      # Timeout 8 seconds rakha hai taaki 502 Bad Gateway na aaye
       response = requests.post(
           SMM_API_URL,
           data={"key": SMM_API_KEY, "action": "services"},
-          timeout=8,
+          timeout=15,
       )
       if response.status_code == 200:
         res_data = response.json()
         if isinstance(res_data, list) and len(res_data) > 0:
           cached_services = res_data
-          last_fetch_time = current_time
     except Exception as e:
-      print("Error fetching services from SMM API:", e)
+      print("Background fetch error:", e)
+    time.sleep(300)
+
+
+def get_cached_smm_services():
+  global cached_services
+  if not cached_services:
+    try:
+      response = requests.post(
+          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=5
+      )
+      if response.status_code == 200:
+        res_data = response.json()
+        if isinstance(res_data, list):
+          cached_services = res_data
+    except:
+      pass
   return cached_services
 
 
@@ -381,40 +389,108 @@ def callback_listener(call):
 
   elif call.data.startswith("plat_"):
     platform_name = call.data.replace("plat_", "").lower()
-    bot.answer_callback_query(call.id, "Opening Dropdown Menu...")
+    bot.answer_callback_query(call.id, "Loading services...")
 
-    title = (
-        "Instagram Followers"
-        if platform_name == "ig_followers"
-        else platform_name.title()
-    )
+    services = get_cached_smm_services()
+    matched_services = []
 
-    markup = types.InlineKeyboardMarkup()
-    web_app_url = f"{RENDER_URL}/webapp?platform={platform_name}"
-    markup.add(
-        types.InlineKeyboardButton(
-            "📱 Open Dropdown Menu", web_app=types.WebAppInfo(url=web_app_url)
-        )
-    )
+    for s in services:
+      cat = s.get("category", "").lower()
+      name = s.get("name", "").lower()
+      match = False
+
+      if platform_name == "ig_followers":
+        if (
+            "instagram" in cat
+            or "ig" in cat
+            or "instagram" in name
+            or "ig" in name
+        ) and ("follower" in cat or "follower" in name):
+          match = True
+      else:
+        if platform_name in cat or platform_name in name:
+          match = True
+
+      if match:
+        matched_services.append(s)
+
+    if not matched_services:
+      bot.send_message(
+          chat_id,
+          "❌ Is category mein koi service nahi mili.",
+          parse_mode="Markdown",
+      )
+      return
+
+    # Sirf pehli 10 services dikhayenge taaki chat clean rahe
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for s in matched_services[:10]:
+      selling_price = calculate_selling_price(s.get("rate", 0))
+      btn_text = f"{s.get('name')} (₹{selling_price}/1K)"
+      markup.add(
+          types.InlineKeyboardButton(
+              btn_text, callback_data=f"srv_{s.get('service')}"
+          )
+      )
 
     bot.send_message(
         chat_id,
-        f"📋 **{title} Services:**\n\nNiche diye gaye button par click karke"
-        " Dropdown Menu kholen:",
+        "📋 **Select Service:**",
         parse_mode="Markdown",
         reply_markup=markup,
     )
 
+  elif call.data.startswith("srv_"):
+    service_id = call.data.replace("srv_", "")
+    bot.answer_callback_query(call.id)
+    user_order_state[user_id] = {"service_id": service_id}
 
-# ==================== WEB APP DATA HANDLER (ORDER PLACEMENT) ====================
-@bot.message_handler(content_types=["web_app_data"])
-def handle_web_app_data(message):
+    msg = bot.send_message(
+        chat_id,
+        "🔗 **Ab apna Link bhejein** (jahan followers/likes chahiye):",
+        parse_mode="Markdown",
+    )
+    bot.register_next_step_handler(msg, process_order_link)
+
+
+def process_order_link(message):
   user_id = message.from_user.id
+  if message.text in MENU_BUTTONS:
+    handle_menu_buttons(message)
+    return
+
+  if user_id not in user_order_state:
+    bot.reply_to(message, "❌ Session expired. Dobara start karein.")
+    return
+
+  user_order_state[user_id]["link"] = message.text.strip()
+  msg = bot.send_message(
+      message.chat.id,
+      "📊 **Quantity kitni chahiye?** (Number me likhein, jaise: 1000)",
+      parse_mode="Markdown",
+  )
+  bot.register_next_step_handler(msg, process_order_quantity)
+
+
+def process_order_quantity(message):
+  user_id = message.from_user.id
+  if message.text in MENU_BUTTONS:
+    handle_menu_buttons(message)
+    return
+
+  if user_id not in user_order_state:
+    bot.reply_to(message, "❌ Session expired. Dobara start karein.")
+    return
+
   try:
-    data = json.loads(message.web_app_data.data)
-    service_id = data.get("service")
-    link = data.get("link")
-    quantity = int(data.get("quantity", 0))
+    quantity = int(message.text.strip())
+    if quantity <= 0:
+      bot.reply_to(message, "❌ Quantity 0 se zyada honi chahiye.")
+      return
+
+    state = user_order_state[user_id]
+    service_id = state["service_id"]
+    link = state["link"]
 
     services = get_cached_smm_services()
     selected_service = None
@@ -425,6 +501,7 @@ def handle_web_app_data(message):
 
     if not selected_service:
       bot.reply_to(message, "❌ Selected service not found.")
+      clear_user_state(user_id)
       return
 
     wholesale_rate = float(selected_service.get("rate", 0))
@@ -438,10 +515,10 @@ def handle_web_app_data(message):
       bot.reply_to(
           message,
           f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour"
-          f" Balance: ₹{current_balance:.2f}\n\nPlease add funds using '💳 Add"
-          ' Funds (QR & UPI)\' button.',
+          f" Balance: ₹{current_balance:.2f}\n\nPehle Funds Add karein.",
           parse_mode="Markdown",
       )
+      clear_user_state(user_id)
       return
 
     smm_payload = {
@@ -494,116 +571,12 @@ def handle_web_app_data(message):
           parse_mode="Markdown",
       )
 
-  except Exception as e:
-    print("Error processing web app order:", e)
-    bot.reply_to(message, f"❌ Error processing your order: {str(e)}")
+    clear_user_state(user_id)
 
-
-# ==================== FLASK WEBAPP ROUTE ====================
-@app.route("/webapp")
-def webapp():
-  platform = request.args.get("platform", "instagram").lower()
-
-  matched_services = []
-  try:
-    services = get_cached_smm_services()
-    for s in services:
-      cat = s.get("category", "").lower()
-      name = s.get("name", "").lower()
-      match = False
-
-      if platform == "ig_followers":
-        if (
-            "instagram" in cat
-            or "ig" in cat
-            or "instagram" in name
-            or "ig" in name
-        ) and ("follower" in cat or "follower" in name):
-          match = True
-      else:
-        if platform in cat or platform in name:
-          match = True
-
-      if match:
-        selling_price = calculate_selling_price(s.get("rate", 0))
-        matched_services.append({
-            "service": s.get("service"),
-            "name": f"{s.get('name')} - ₹{selling_price}/1K",
-        })
-
-    if not matched_services and services:
-      for s in services:
-        selling_price = calculate_selling_price(s.get("rate", 0))
-        matched_services.append({
-            "service": s.get("service"),
-            "name": f"{s.get('name')} - ₹{selling_price}/1K",
-        })
-
-  except Exception as e:
-    print("Error in webapp route:", e)
-    matched_services = []
-
-  html_template = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SMM Dropdown Menu</title>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        <style>
-            body { font-family: Arial, sans-serif; background-color: #18222d; color: #fff; padding: 20px; margin: 0; }
-            h2 { text-align: center; color: #2ea6ff; }
-            .form-group { margin-bottom: 20px; }
-            label { display: block; margin-bottom: 8px; font-weight: bold; font-size: 14px; }
-            select, input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #2b3847; background-color: #212f3d; color: #fff; font-size: 16px; box-sizing: border-box; }
-            .btn { width: 100%; background-color: #2ea6ff; color: white; border: none; padding: 14px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-            .btn:active { background-color: #1a8ad4; }
-        </style>
-    </head>
-    <body>
-        <h2>⚡ SMM Dropdown Menu</h2>
-        <div class="form-group">
-            <label>Select Service Category / Item:</label>
-            <select id="serviceSelect">
-                <option value="">-- Choose Service --</option>
-                {% for s in services %}
-                    <option value="{{ s.service }}">{{ s.name }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="form-group">
-            <label>Link:</label>
-            <input type="text" id="orderLink" placeholder="Enter your link here...">
-        </div>
-        <div class="form-group">
-            <label>Quantity:</label>
-            <input type="number" id="orderQty" placeholder="Enter quantity...">
-        </div>
-        <button class="btn" onclick="submitOrder()">Submit Order</button>
-
-        <script>
-            let tg = window.Telegram.WebApp;
-            tg.expand();
-
-            function submitOrder() {
-                let service = document.getElementById('serviceSelect').value;
-                let link = document.getElementById('orderLink').value;
-                let qty = document.getElementById('orderQty').value;
-                if(!service || !link || !qty) {
-                    alert('Please fill all fields!');
-                    return;
-                }
-                tg.sendData(JSON.stringify({service: service, link: link, quantity: qty}));
-                tg.close();
-            }
-        </script>
-    </body>
-    </html>
-    """
-  return render_template_string(
-      html_template, services=matched_services, platform=platform
-  )
+  except ValueError:
+    bot.reply_to(
+        message, "❌ Kripya valid number dalein (jaise: 500 ya 1000)."
+    )
 
 
 # ==================== FLASK WEBHOOK ROUTE ====================
@@ -623,18 +596,18 @@ def webhook():
     return "Forbidden", 403
 
 
-# Background Self-Ping to prevent Render Sleep (502 Gateway Fix)
+# Background Keep-Alive Ping
 def keep_alive():
   while True:
     try:
       requests.get(RENDER_URL, timeout=5)
     except:
       pass
-    time.sleep(300)  # Har 5 minute mein ping karega
+    time.sleep(300)
 
 
 if __name__ == "__main__":
-  # Start keep-alive thread
+  threading.Thread(target=fetch_services_background, daemon=True).start()
   threading.Thread(target=keep_alive, daemon=True).start()
 
   bot.remove_webhook()
