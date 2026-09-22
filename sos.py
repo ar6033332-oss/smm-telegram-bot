@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from flask import Flask, request
+from flask import Flask, render_template_string, request
 import psycopg2
 from urllib.parse import urlparse
 import razorpay
@@ -345,186 +345,128 @@ def callback_listener(call):
 
   elif call.data.startswith("plat_"):
     platform_name = call.data.replace("plat_", "").lower()
-    bot.answer_callback_query(call.id, "Loading services...")
-    try:
-      services = requests.post(
-          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}
-      ).json()
-      matched = []
+    bot.answer_callback_query(call.id, "Opening Dropdown Menu...")
 
-      if platform_name == "ig_followers":
-        for s in services:
-          cat = s.get("category", "").lower()
-          s_name = s.get("name", "").lower()
-          if (
-              "instagram" in cat
-              or "ig" in cat
-              or "instagram" in s_name
-              or "ig" in s_name
-          ) and ("follower" in cat or "follower" in s_name):
-            matched.append(s)
-      else:
-        keywords = [platform_name]
-        if platform_name == "instagram":
-          keywords = ["instagram", "ig"]
-        for s in services:
-          cat = s.get("category", "").lower()
-          s_name = s.get("name", "").lower()
-          if any(k in cat or k in s_name for k in keywords):
-            matched.append(s)
-
-      if not matched:
-        bot.send_message(
-            chat_id, "❌ No services found for this category."
-        )
-        return
-
-      markup = types.InlineKeyboardMarkup(row_width=1)
-      for s in matched[:15]:
-        price = calculate_selling_price(s.get("rate", 0))
-        # Service name ko chota kar rahe hain taaki price aur details na katein
-        raw_name = s.get("name", "Service")
-        short_name = raw_name[:28] + "..." if len(raw_name) > 28 else raw_name
-        
-        markup.add(
-            types.InlineKeyboardButton(
-                f"{short_name} - ₹{price}/1K",
-                callback_data=f"buy_{s.get('service')}",
-            )
-        )
-
-      title = (
-          "Instagram Followers"
-          if platform_name == "ig_followers"
-          else platform_name.title()
-      )
-      bot.send_message(
-          chat_id,
-          f"📋 **{title} Services:**",
-          parse_mode="Markdown",
-          reply_markup=markup,
-      )
-    except:
-      bot.send_message(chat_id, "⚠️ Error loading services.")
-
-  elif call.data.startswith("buy_"):
-    user_order_state[user_id] = {
-        "service_id": call.data.replace("buy_", ""),
-        "step": "wait_link",
-    }
-    msg = bot.send_message(
-        chat_id, "🔗 **Send your Link:**", parse_mode="Markdown"
+    title = (
+        "Instagram Followers"
+        if platform_name == "ig_followers"
+        else platform_name.title()
     )
-    bot.register_next_step_handler(msg, process_link)
 
-
-def process_link(message):
-  user_id = message.from_user.id
-  if message.text and message.text.startswith("/"):
-    clear_user_state(user_id)
-    if message.text == "/start":
-      start_handler(message)
-    return
-
-  if message.text in MENU_BUTTONS:
-    clear_user_state(user_id)
-    handle_menu_buttons(message)
-    return
-
-  if user_id in user_order_state:
-    user_order_state[user_id]["link"] = message.text
-    user_order_state[user_id]["step"] = "wait_qty"
-    msg = bot.send_message(
-        message.chat.id, "🔢 **Enter Quantity:**", parse_mode="Markdown"
+    # Web App Button jo website ki tarah dropdown menu kholega
+    markup = types.InlineKeyboardMarkup()
+    web_app_url = f"{RENDER_URL}/webapp?platform={platform_name}"
+    markup.add(
+        types.InlineKeyboardButton(
+            "📱 Open Dropdown Menu", web_app=types.WebAppInfo(url=web_app_url)
+        )
     )
-    bot.register_next_step_handler(msg, process_qty)
+
+    bot.send_message(
+        chat_id,
+        f"📋 **{title} Services:**\n\nNiche diye gaye button par click karke"
+        " Dropdown Menu kholen:",
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
 
 
-def process_qty(message):
-  user_id = message.from_user.id
-  if message.text and message.text.startswith("/"):
-    clear_user_state(user_id)
-    if message.text == "/start":
-      start_handler(message)
-    return
+# ==================== FLASK WEBAPP ROUTE (DROPDOWN UI) ====================
+@app.route("/webapp")
+def webapp():
+  platform = request.args.get("platform", "instagram")
+  html_template = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SMM Dropdown Menu</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            body { font-family: Arial, sans-serif; background-color: #18222d; color: #fff; padding: 20px; margin: 0; }
+            h2 { text-align: center; color: #2ea6ff; }
+            .form-group { margin-bottom: 20px; }
+            label { display: block; margin-bottom: 8px; font-weight: bold; font-size: 14px; }
+            select, input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #2b3847; background-color: #212f3d; color: #fff; font-size: 16px; box-sizing: border-box; }
+            .btn { width: 100%; background-color: #2ea6ff; color: white; border: none; padding: 14px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+            .btn:active { background-color: #1a8ad4; }
+        </style>
+    </head>
+    <body>
+        <h2>⚡ SMM Dropdown Menu</h2>
+        <div class="form-group">
+            <label>Select Service Category / Item:</label>
+            <select id="serviceSelect">
+                <option value="">Loading services...</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Link:</label>
+            <input type="text" id="orderLink" placeholder="Enter your link here...">
+        </div>
+        <div class="form-group">
+            <label>Quantity:</label>
+            <input type="number" id="orderQty" placeholder="Enter quantity...">
+        </div>
+        <button class="btn" onclick="submitOrder()">Submit Order</button>
 
-  if message.text in MENU_BUTTONS:
-    clear_user_state(user_id)
-    handle_menu_buttons(message)
-    return
+        <script>
+            let tg = window.Telegram.WebApp;
+            tg.expand();
 
-  if user_id in user_order_state:
-    try:
-      qty = int(message.text)
-      state = user_order_state[user_id]
-      services = requests.post(
-          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}
-      ).json()
-      selected = next(
-          (
-              s
-              for s in services
-              if str(s.get("service")) == state["service_id"]
-          ),
-          None,
-      )
+            async function loadServices() {
+                try {
+                    let response = await fetch('https://smmwiz.com/api/v2', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                        body: 'key={{ api_key }}&action=services'
+                    });
+                    let data = await response.json();
+                    let select = document.getElementById('serviceSelect');
+                    select.innerHTML = '<option value="">-- Choose Service --</option>';
+                    
+                    let plat = "{{ platform }}";
+                    data.forEach(s => {
+                        let cat = s.category ? s.category.toLowerCase() : '';
+                        let name = s.name ? s.name.toLowerCase() : '';
+                        let match = false;
+                        if(plat === 'ig_followers') {
+                            if((cat.includes('instagram') || name.includes('instagram') || cat.includes('ig') || name.includes('ig')) && (cat.includes('follower') || name.includes('follower'))) match = true;
+                        } else {
+                            if(cat.includes(plat) || name.includes(plat)) match = true;
+                        }
+                        if(match) {
+                            let opt = document.createElement('option');
+                            opt.value = s.service;
+                            opt.text = s.name + " - Rate: " + s.rate;
+                            select.appendChild(opt);
+                        }
+                    });
+                } catch(e) {
+                    document.getElementById('serviceSelect').innerHTML = '<option>Error loading services</option>';
+                }
+            }
+            loadServices();
 
-      if not selected:
-        bot.send_message(message.chat.id, "❌ Service not found.")
-        clear_user_state(user_id)
-        return
-
-      cost = round(
-          (calculate_selling_price(selected.get("rate", 0)) / 1000.0) * qty, 2
-      )
-      if get_user(user_id)[0] < cost:
-        bot.send_message(message.chat.id, "❌ Low balance!")
-        clear_user_state(user_id)
-        return
-
-      res = requests.post(
-          SMM_API_URL,
-          data={
-              "key": SMM_API_KEY,
-              "action": "add",
-              "service": state["service_id"],
-              "link": state["link"],
-              "quantity": qty,
-          },
-      ).json()
-      if "order" in res:
-        update_balance(user_id, -cost)
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO orders (order_id, user_id, service_name, link,"
-            " quantity, cost, date_time) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (
-                str(res["order"]),
-                user_id,
-                selected.get("name"),
-                state["link"],
-                qty,
-                cost,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            ),
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-        bot.send_message(
-            message.chat.id,
-            f"🎉 **Order Placed!**\nID: `{res['order']}`",
-            parse_mode="Markdown",
-        )
-      else:
-        bot.send_message(
-            message.chat.id, f"❌ Error: {res.get('error', 'Unknown')}"
-        )
-      clear_user_state(user_id)
-    except ValueError:
-      msg = bot.send_message(message.chat.id, "❌ Enter valid number:")
-      bot.register_next_step_handler(msg, process_qty)
+            function submitOrder() {
+                let service = document.getElementById('serviceSelect').value;
+                let link = document.getElementById('orderLink').value;
+                let qty = document.getElementById('orderQty').value;
+                if(!service || !link || !qty) {
+                    alert('Please fill all fields!');
+                    return;
+                }
+                tg.sendData(JSON.stringify({service: service, link: link, quantity: qty}));
+                tg.close();
+            }
+        </script>
+    </body>
+    </html>
+    """
+  return render_template_string(
+      html_template, platform=platform, api_key=SMM_API_KEY
+  )
 
 
 # ==================== FLASK WEBHOOK ROUTE ====================
