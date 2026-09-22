@@ -353,7 +353,6 @@ def callback_listener(call):
         else platform_name.title()
     )
 
-    # Web App Button jo website ki tarah dropdown menu kholega
     markup = types.InlineKeyboardMarkup()
     web_app_url = f"{RENDER_URL}/webapp?platform={platform_name}"
     markup.add(
@@ -371,10 +370,43 @@ def callback_listener(call):
     )
 
 
-# ==================== FLASK WEBAPP ROUTE (DROPDOWN UI) ====================
+# ==================== FLASK WEBAPP ROUTE (FIXED CORS & LOADING) ====================
 @app.route("/webapp")
 def webapp():
   platform = request.args.get("platform", "instagram")
+  
+  # Server side se services fetch kar rahe hain taaki CORS error na aaye
+  matched_services = []
+  try:
+    response = requests.post(
+        SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}
+    )
+    services = response.json()
+    
+    for s in services:
+      cat = s.get("category", "").lower()
+      name = s.get("name", "").lower()
+      match = False
+      if platform == "ig_followers":
+        if (
+            "instagram" in cat
+            or "ig" in cat
+            or "instagram" in name
+            or "ig" in name
+        ) and ("follower" in cat or "follower" in name):
+          match = True
+      else:
+        if platform in cat or platform in name:
+          match = True
+      if match:
+        selling_price = calculate_selling_price(s.get("rate", 0))
+        matched_services.append({
+            "service": s.get("service"),
+            "name": f"{s.get('name')} - ₹{selling_price}/1K",
+        })
+  except Exception as e:
+    matched_services = []
+
   html_template = """
     <!DOCTYPE html>
     <html lang="en">
@@ -398,7 +430,10 @@ def webapp():
         <div class="form-group">
             <label>Select Service Category / Item:</label>
             <select id="serviceSelect">
-                <option value="">Loading services...</option>
+                <option value="">-- Choose Service --</option>
+                {% for s in services %}
+                    <option value="{{ s.service }}">{{ s.name }}</option>
+                {% endfor %}
             </select>
         </div>
         <div class="form-group">
@@ -414,40 +449,6 @@ def webapp():
         <script>
             let tg = window.Telegram.WebApp;
             tg.expand();
-
-            async function loadServices() {
-                try {
-                    let response = await fetch('https://smmwiz.com/api/v2', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                        body: 'key={{ api_key }}&action=services'
-                    });
-                    let data = await response.json();
-                    let select = document.getElementById('serviceSelect');
-                    select.innerHTML = '<option value="">-- Choose Service --</option>';
-                    
-                    let plat = "{{ platform }}";
-                    data.forEach(s => {
-                        let cat = s.category ? s.category.toLowerCase() : '';
-                        let name = s.name ? s.name.toLowerCase() : '';
-                        let match = false;
-                        if(plat === 'ig_followers') {
-                            if((cat.includes('instagram') || name.includes('instagram') || cat.includes('ig') || name.includes('ig')) && (cat.includes('follower') || name.includes('follower'))) match = true;
-                        } else {
-                            if(cat.includes(plat) || name.includes(plat)) match = true;
-                        }
-                        if(match) {
-                            let opt = document.createElement('option');
-                            opt.value = s.service;
-                            opt.text = s.name + " - Rate: " + s.rate;
-                            select.appendChild(opt);
-                        }
-                    });
-                } catch(e) {
-                    document.getElementById('serviceSelect').innerHTML = '<option>Error loading services</option>';
-                }
-            }
-            loadServices();
 
             function submitOrder() {
                 let service = document.getElementById('serviceSelect').value;
@@ -465,7 +466,7 @@ def webapp():
     </html>
     """
   return render_template_string(
-      html_template, platform=platform, api_key=SMM_API_KEY
+      html_template, services=matched_services, platform=platform
   )
 
 
