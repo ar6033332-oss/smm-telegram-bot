@@ -384,7 +384,7 @@ def callback_listener(call):
         price = calculate_selling_price(s.get("rate", 0))
         # Service name ko chota kar rahe hain taaki price aur details na katein
         raw_name = s.get("name", "Service")
-        short_name = raw_name[:30] + "..." if len(raw_name) > 30 else raw_name
+        short_name = raw_name[:28] + "..." if len(raw_name) > 28 else raw_name
         
         markup.add(
             types.InlineKeyboardButton(
@@ -420,6 +420,12 @@ def callback_listener(call):
 
 def process_link(message):
   user_id = message.from_user.id
+  if message.text and message.text.startswith("/"):
+    clear_user_state(user_id)
+    if message.text == "/start":
+      start_handler(message)
+    return
+
   if message.text in MENU_BUTTONS:
     clear_user_state(user_id)
     handle_menu_buttons(message)
@@ -436,6 +442,12 @@ def process_link(message):
 
 def process_qty(message):
   user_id = message.from_user.id
+  if message.text and message.text.startswith("/"):
+    clear_user_state(user_id)
+    if message.text == "/start":
+      start_handler(message)
+    return
+
   if message.text in MENU_BUTTONS:
     clear_user_state(user_id)
     handle_menu_buttons(message)
