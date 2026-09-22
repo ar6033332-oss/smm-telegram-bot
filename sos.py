@@ -2,15 +2,15 @@ import telebot
 from telebot import types
 import requests
 import sqlite3
-import time
 from datetime import datetime
 import os
-from flask import Flask
-import threading
+from flask import Flask, request
 import razorpay
 
 # ==================== CONFIGURATION ====================
 BOT_TOKEN = "8203717604:AAEQ0e6eGkD-mjf4pVnbzpWD1cHz_bNxmK0"
+RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"  # Aapka Render App URL
+
 SMM_API_URL = "https://smmwiz.com/api/v2"
 SMM_API_KEY = "d0ee8a3432a6770f9a6003181d308d72"
 
@@ -227,7 +227,7 @@ def callback_listener(call):
 
     elif call.data.startswith("buy_"):
         user_order_state[user_id] = {'service_id': call.data.replace("buy_", ""), 'step': 'wait_link'}
-        msg = bot.send_message(chat_id, "🔗 **Send your Link:**", parse_message="Markdown")
+        msg = bot.send_message(chat_id, "🔗 **Send your Link:**", parse_mode="Markdown")
         bot.register_next_step_handler(msg, process_link)
 
 def process_link(message):
@@ -283,17 +283,23 @@ def process_qty(message):
             msg = bot.send_message(message.chat.id, "❌ Enter valid number:")
             bot.register_next_step_handler(msg, process_qty)
 
-# ==================== FLASK & RUN ====================
+# ==================== FLASK WEBHOOK ROUTE ====================
 @app.route('/')
 def home():
-    return "Bot is running!"
+    return "Bot is running via Webhook!"
+
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return "OK", 200
+    else:
+        return "Forbidden", 403
 
 if __name__ == '__main__':
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))).start()
     bot.remove_webhook()
-    bot.reset_webhook()  # Purane conflicts saaf karne ke liye
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except:
-            time.sleep(5)
+    bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
