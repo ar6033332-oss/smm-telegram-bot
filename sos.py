@@ -122,10 +122,10 @@ def start_handler(message):
 
 @bot.message_handler(commands=['addfunds'])
 def addfunds_command(message):
-    ask_amount_logic(message)
+    ask_amount_logic(message.chat.id, message.from_user.first_name)
 
-def ask_amount_logic(message):
-    msg = bot.reply_to(message, "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)")
+def ask_amount_logic(chat_id, first_name):
+    msg = bot.send_message(chat_id, "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)", parse_mode="Markdown")
     bot.register_next_step_handler(msg, process_payment_amount)
 
 def process_payment_amount(message):
@@ -186,7 +186,7 @@ def callback_listener(call):
 
     if call.data == "pay_razorpay":
         bot.answer_callback_query(call.id)
-        ask_amount_logic(call.message)
+        ask_amount_logic(chat_id, call.from_user.first_name)
 
     elif call.data.startswith("plat_"):
         platform_name = call.data.replace("plat_", "").lower()
