@@ -281,7 +281,7 @@ def set_margin_command(message):
     bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
 
 
-# --- NEW FEATURE 1: ORDER STATUS TRACKING & AUTO-REFUND ---
+# --- FEATURE 1: ORDER STATUS TRACKING & AUTO-REFUND ---
 @bot.message_handler(commands=["status"])
 def status_command(message):
   parts = message.text.split()
@@ -297,7 +297,6 @@ def status_command(message):
   order_id = parts[1].strip()
   user_id = message.from_user.id
 
-  # Database se check karein ki yeh order kiska hai aur cost kitni thi
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -318,14 +317,12 @@ def status_command(message):
 
   db_user_id, order_cost, service_name = order_row
 
-  # Agar non-admin user kisi aur ki order id check kare
   if user_id != ADMIN_ID and user_id != db_user_id:
     bot.reply_to(
         message, "❌ Aap sirf apne orders ka status check kar sakte hain."
     )
     return
 
-  # SMM Panel se status request bhejein
   try:
     payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
     response = requests.post(SMM_API_URL, data=payload, timeout=10)
@@ -352,9 +349,7 @@ def status_command(message):
         f"📈 **Start Count:** `{start_count}`"
     )
 
-    # AUTO-REFUND LOGIC: Agar order Canceled ya Refunded ho gaya hai toh paisa wapas refund karein
     if status.lower() in ["canceled", "refunded"]:
-      # Check karein ki pehle refund toh nahi ho chuka (optional safety, ya direct refund)
       update_balance(db_user_id, order_cost)
       status_msg += (
           f"\n\n💰 **Auto-Refunded:** `₹{order_cost}` aapke account mein wapas"
@@ -367,7 +362,7 @@ def status_command(message):
     bot.reply_to(message, f"❌ Status fetch karne mein error aayi: {str(e)}")
 
 
-# --- NEW FEATURE 2: ADMIN BROADCAST FEATURE ---
+# --- FEATURE 2: ADMIN BROADCAST FEATURE ---
 @bot.message_handler(commands=["broadcast"])
 def broadcast_command(message):
   user_id = message.from_user.id
@@ -375,7 +370,6 @@ def broadcast_command(message):
     bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
     return
 
-  # Message extract karein jo broadcast karna hai
   text_parts = message.text.split(maxsplit=1)
   if len(text_parts) < 2:
     bot.reply_to(
@@ -387,7 +381,6 @@ def broadcast_command(message):
 
   broadcast_text = text_parts[1]
 
-  # Database se saare registered users ke IDs nikalain
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute("SELECT user_id FROM users")
@@ -398,7 +391,7 @@ def broadcast_command(message):
   success_count = 0
   fail_count = 0
 
-  sent_msg = bot.reply_to(
+  bot.reply_to(
       message,
       f"📢 Broadcast shuru ho gaya hai... Total users: {len(all_users)}",
   )
@@ -411,12 +404,8 @@ def broadcast_command(message):
           f"📢 **Announcement:**\n\n{broadcast_text}",
           parse_mode="Markdown",
       )
-      success_count.append(1) if isinstance(success_count, list) else None
-      # Simple counter increment
-      success_count = (
-          success_count + 1 if isinstance(success_count, int) else 1
-      )
-      time.sleep(0.1)  # Telegram rate limit se bachne ke liye chota gap
+      success_count += 1
+      time.sleep(0.1)
     except Exception:
       fail_count += 1
 
@@ -428,7 +417,7 @@ def broadcast_command(message):
   )
 
 
-# --- NEW FEATURE 3: DETAILED BALANCE MANAGEMENT (ADD / CUT BALANCE) ---
+# --- FEATURE 3: DETAILED BALANCE MANAGEMENT ---
 @bot.message_handler(commands=["addbal"])
 def add_balance_admin(message):
   if message.from_user.id != ADMIN_ID:
@@ -446,7 +435,7 @@ def add_balance_admin(message):
   try:
     target_user_id = int(parts[1])
     amount = float(parts[2])
-    register_user(target_user_id)  ensure user exists
+    register_user(target_user_id)  # ensure user exists (Fixed error here)
     update_balance(target_user_id, amount)
     bot.reply_to(
         message,
@@ -888,7 +877,6 @@ def webhook():
     return "Forbidden", 403
 
 
-# Background Keep-Alive Ping
 def keep_alive():
   while True:
     try:
