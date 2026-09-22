@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import os
+import threading
 import time
 from urllib.parse import urlparse
 from flask import Flask, render_template_string, request
@@ -40,7 +41,7 @@ user_order_state = {}
 # Caching variables for fast loading
 cached_services = []
 last_fetch_time = 0
-CACHE_DURATION = 300  # 5 minutes cache
+CACHE_DURATION = 600  # 10 minutes cache
 
 MENU_BUTTONS = [
     "🛍 Select Platform",
@@ -62,27 +63,30 @@ def get_db_connection():
 
 
 def init_db():
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  cursor.execute(
-      "CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, balance"
-      " REAL DEFAULT 0.0)"
-  )
-  cursor.execute(
-      "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value REAL)"
-  )
-  cursor.execute(
-      "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id TEXT,"
-      " user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER, cost"
-      " REAL, date_time TEXT)"
-  )
-  cursor.execute(
-      "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
-      " CONFLICT (key) DO NOTHING"
-  )
-  conn.commit()
-  cursor.close()
-  conn.close()
+  try:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, balance"
+        " REAL DEFAULT 0.0)"
+    )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value REAL)"
+    )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id"
+        " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
+        " cost REAL, date_time TEXT)"
+    )
+    cursor.execute(
+        "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
+        " CONFLICT (key) DO NOTHING"
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+  except Exception as e:
+    print("Database Init Error:", e)
 
 
 init_db()
@@ -92,18 +96,22 @@ init_db()
 def get_cached_smm_services():
   global cached_services, last_fetch_time
   current_time = time.time()
+  # Agar cache khali hai ya purana ho gaya hai
   if not cached_services or (current_time - last_fetch_time) > CACHE_DURATION:
     try:
+      # Timeout 8 seconds rakha hai taaki 502 Bad Gateway na aaye
       response = requests.post(
-          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}
+          SMM_API_URL,
+          data={"key": SMM_API_KEY, "action": "services"},
+          timeout=8,
       )
       if response.status_code == 200:
         res_data = response.json()
-        if isinstance(res_data, list):
+        if isinstance(res_data, list) and len(res_data) > 0:
           cached_services = res_data
           last_fetch_time = current_time
     except Exception as e:
-      print("Error fetching services:", e)
+      print("Error fetching services from SMM API:", e)
   return cached_services
 
 
@@ -408,7 +416,6 @@ def handle_web_app_data(message):
     link = data.get("link")
     quantity = int(data.get("quantity", 0))
 
-    # Fetch cached services to find the correct service name and rate
     services = get_cached_smm_services()
     selected_service = None
     for s in services:
@@ -424,7 +431,6 @@ def handle_web_app_data(message):
     unit_selling_price = calculate_selling_price(wholesale_rate)
     total_cost = round((unit_selling_price * quantity) / 1000.0, 2)
 
-    # Check user balance
     user_row = get_user(user_id)
     current_balance = user_row[0] if user_row else 0.0
 
@@ -438,7 +444,6 @@ def handle_web_app_data(message):
       )
       return
 
-    # Place Order on SMM Panel
     smm_payload = {
         "key": SMM_API_KEY,
         "action": "add",
@@ -446,16 +451,13 @@ def handle_web_app_data(message):
         "link": link,
         "quantity": quantity,
     }
-    smm_resp = requests.post(SMM_API_URL, data=smm_payload)
+    smm_resp = requests.post(SMM_API_URL, data=smm_payload, timeout=10)
     smm_data = smm_resp.json()
 
     if "order" in smm_data:
       smm_order_id = str(smm_data["order"])
-
-      # Deduct balance from user account
       update_balance(user_id, -total_cost)
 
-      # Save order in Database
       conn = get_db_connection()
       cursor = conn.cursor()
       cursor.execute(
@@ -475,7 +477,6 @@ def handle_web_app_data(message):
       cursor.close()
       conn.close()
 
-      # Send success reply to user
       bot.reply_to(
           message,
           f"✅ **Order Placed Successfully!**\n\n🆔 Order ID:"
@@ -530,7 +531,6 @@ def webapp():
             "name": f"{s.get('name')} - ₹{selling_price}/1K",
         })
 
-    # Fallback: Agar kisi filtering ki wajah se list khali reh jaye, toh saari services dikha do
     if not matched_services and services:
       for s in services:
         selling_price = calculate_selling_price(s.get("rate", 0))
@@ -540,7 +540,7 @@ def webapp():
         })
 
   except Exception as e:
-    print("Error in webapp:", e)
+    print("Error in webapp route:", e)
     matched_services = []
 
   html_template = """
@@ -623,7 +623,20 @@ def webhook():
     return "Forbidden", 403
 
 
+# Background Self-Ping to prevent Render Sleep (502 Gateway Fix)
+def keep_alive():
+  while True:
+    try:
+      requests.get(RENDER_URL, timeout=5)
+    except:
+      pass
+    time.sleep(300)  # Har 5 minute mein ping karega
+
+
 if __name__ == "__main__":
+  # Start keep-alive thread
+  threading.Thread(target=keep_alive, daemon=True).start()
+
   bot.remove_webhook()
   bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
   port = int(os.environ.get("PORT", 10000))
