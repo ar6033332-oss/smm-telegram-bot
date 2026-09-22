@@ -1,9 +1,10 @@
+from datetime import datetime
+import json
 import os
 import time
-from datetime import datetime
+from urllib.parse import urlparse
 from flask import Flask, render_template_string, request
 import psycopg2
-from urllib.parse import urlparse
 import razorpay
 import requests
 import telebot
@@ -397,6 +398,106 @@ def callback_listener(call):
     )
 
 
+# ==================== WEB APP DATA HANDLER (ORDER PLACEMENT) ====================
+@bot.message_handler(content_types=["web_app_data"])
+def handle_web_app_data(message):
+  user_id = message.from_user.id
+  try:
+    data = json.loads(message.web_app_data.data)
+    service_id = data.get("service")
+    link = data.get("link")
+    quantity = int(data.get("quantity", 0))
+
+    # Fetch cached services to find the correct service name and rate
+    services = get_cached_smm_services()
+    selected_service = None
+    for s in services:
+      if str(s.get("service")) == str(service_id):
+        selected_service = s
+        break
+
+    if not selected_service:
+      bot.reply_to(message, "❌ Selected service not found.")
+      return
+
+    wholesale_rate = float(selected_service.get("rate", 0))
+    unit_selling_price = calculate_selling_price(wholesale_rate)
+    total_cost = round((unit_selling_price * quantity) / 1000.0, 2)
+
+    # Check user balance
+    user_row = get_user(user_id)
+    current_balance = user_row[0] if user_row else 0.0
+
+    if current_balance < total_cost:
+      bot.reply_to(
+          message,
+          f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour"
+          f" Balance: ₹{current_balance:.2f}\n\nPlease add funds using '💳 Add"
+          ' Funds (QR & UPI)\' button.',
+          parse_mode="Markdown",
+      )
+      return
+
+    # Place Order on SMM Panel
+    smm_payload = {
+        "key": SMM_API_KEY,
+        "action": "add",
+        "service": service_id,
+        "link": link,
+        "quantity": quantity,
+    }
+    smm_resp = requests.post(SMM_API_URL, data=smm_payload)
+    smm_data = smm_resp.json()
+
+    if "order" in smm_data:
+      smm_order_id = str(smm_data["order"])
+
+      # Deduct balance from user account
+      update_balance(user_id, -total_cost)
+
+      # Save order in Database
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "INSERT INTO orders (order_id, user_id, service_name, link, quantity,"
+          " cost, date_time) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+          (
+              smm_order_id,
+              user_id,
+              selected_service.get("name"),
+              link,
+              quantity,
+              total_cost,
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+          ),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
+
+      # Send success reply to user
+      bot.reply_to(
+          message,
+          f"✅ **Order Placed Successfully!**\n\n🆔 Order ID:"
+          f" `{smm_order_id}`\n📦 Service:"
+          f" `{selected_service.get('name')}`\n🔗 Link: `{link}`\n📊 Quantity:"
+          f" `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance:"
+          f" `₹{current_balance - total_cost:.2f}`",
+          parse_mode="Markdown",
+      )
+    else:
+      error_msg = smm_data.get("error", "Unknown SMM Error")
+      bot.reply_to(
+          message,
+          f"❌ **SMM Panel Error:**\n`{error_msg}`",
+          parse_mode="Markdown",
+      )
+
+  except Exception as e:
+    print("Error processing web app order:", e)
+    bot.reply_to(message, f"❌ Error processing your order: {str(e)}")
+
+
 # ==================== FLASK WEBAPP ROUTE ====================
 @app.route("/webapp")
 def webapp():
@@ -429,7 +530,7 @@ def webapp():
             "name": f"{s.get('name')} - ₹{selling_price}/1K",
         })
 
-    # Fallback: Agar kisi filtering ki wajah se list khali reh jaye, toh saari services dikha do taaki blank na aaye
+    # Fallback: Agar kisi filtering ki wajah se list khali reh jaye, toh saari services dikha do
     if not matched_services and services:
       for s in services:
         selling_price = calculate_selling_price(s.get("rate", 0))
