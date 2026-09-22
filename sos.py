@@ -8,7 +8,7 @@ from flask import Flask, request
 import razorpay
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8203717604:AAEQ0e6eGkD-mjf4pVnbzpWD1cHz_bNxmK0"
+BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
 RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
 
 SMM_API_URL = "https://smmwiz.com/api/v2"
