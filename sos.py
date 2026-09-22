@@ -48,15 +48,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
   if DATABASE_URL:
-    url = urlparse(DATABASE_URL)
-    conn = psycopg2.connect(
-        database=url.path[1:],
-        user=url.username,
-        password=url.password,
-        host=url.hostname,
-        port=url.port,
-    )
-    return conn
+    return psycopg2.connect(DATABASE_URL)
   else:
     raise ValueError("DATABASE_URL environment variable is not set!")
 
@@ -540,4 +532,4 @@ if __name__ == "__main__":
   bot.remove_webhook()
   bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
   port = int(os.environ.get("PORT", 10000))
-  app.run(host="0.0.0.0", port=port)
+  app.run(0.0.0.0, port=port)
