@@ -16,7 +16,7 @@ SMM_API_URL = "https://smmwiz.com/api/v2"
 SMM_API_KEY = "d0ee8a3432a6770f9a6003181d308d72"
 
 ADMIN_ID = 6658716591
-UPI_ID = "8882926647-3@ybl"
+UPI_ID = "arshad79@ptyes"
 QR_CODE_URL = (
     "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
 )
@@ -382,9 +382,13 @@ def callback_listener(call):
       markup = types.InlineKeyboardMarkup(row_width=1)
       for s in matched[:15]:
         price = calculate_selling_price(s.get("rate", 0))
+        # Service name ko chota kar rahe hain taaki price aur details na katein
+        raw_name = s.get("name", "Service")
+        short_name = raw_name[:30] + "..." if len(raw_name) > 30 else raw_name
+        
         markup.add(
             types.InlineKeyboardButton(
-                f"{s.get('name')} - ₹{price}/1K",
+                f"{short_name} - ₹{price}/1K",
                 callback_data=f"buy_{s.get('service')}",
             )
         )
