@@ -281,6 +281,237 @@ def set_margin_command(message):
     bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
 
 
+# --- NEW FEATURE 1: ORDER STATUS TRACKING & AUTO-REFUND ---
+@bot.message_handler(commands=["status"])
+def status_command(message):
+  parts = message.text.split()
+  if len(parts) < 2:
+    bot.reply_to(
+        message,
+        "❌ Sahi format use karein: `/status <Order_ID>`\nJaise: `/status"
+        " 123456`",
+        parse_mode="Markdown",
+    )
+    return
+
+  order_id = parts[1].strip()
+  user_id = message.from_user.id
+
+  # Database se check karein ki yeh order kiska hai aur cost kitni thi
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT user_id, cost, service_name FROM orders WHERE order_id = %s",
+      (order_id,),
+  )
+  order_row = cursor.fetchone()
+  cursor.close()
+  conn.close()
+
+  if not order_row:
+    bot.reply_to(
+        message,
+        "❌ Yeh Order ID database mein nahi mili. Sahi Order ID enter karein.",
+        parse_mode="Markdown",
+    )
+    return
+
+  db_user_id, order_cost, service_name = order_row
+
+  # Agar non-admin user kisi aur ki order id check kare
+  if user_id != ADMIN_ID and user_id != db_user_id:
+    bot.reply_to(
+        message, "❌ Aap sirf apne orders ka status check kar sakte hain."
+    )
+    return
+
+  # SMM Panel se status request bhejein
+  try:
+    payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
+    response = requests.post(SMM_API_URL, data=payload, timeout=10)
+    res_data = response.json()
+
+    if "error" in res_data:
+      bot.reply_to(
+          message,
+          f"❌ **SMM Error:** `{res_data['error']}`",
+          parse_mode="Markdown",
+      )
+      return
+
+    status = res_data.get("status", "Unknown")
+    remains = res_data.get("remains", "N/A")
+    start_count = res_data.get("start_count", "N/A")
+
+    status_msg = (
+        f"📊 **Order Status Details**\n\n"
+        f"🆔 **Order ID:** `{order_id}`\n"
+        f"📦 **Service:** `{service_name}`\n"
+        f"📌 **Status:** `{status}`\n"
+        f"📉 **Remains:** `{remains}`\n"
+        f"📈 **Start Count:** `{start_count}`"
+    )
+
+    # AUTO-REFUND LOGIC: Agar order Canceled ya Refunded ho gaya hai toh paisa wapas refund karein
+    if status.lower() in ["canceled", "refunded"]:
+      # Check karein ki pehle refund toh nahi ho chuka (optional safety, ya direct refund)
+      update_balance(db_user_id, order_cost)
+      status_msg += (
+          f"\n\n💰 **Auto-Refunded:** `₹{order_cost}` aapke account mein wapas"
+          " jama kar diye gaye hain kyunki order cancel ho gaya tha."
+      )
+
+    bot.reply_to(message, status_msg, parse_mode="Markdown")
+
+  except Exception as e:
+    bot.reply_to(message, f"❌ Status fetch karne mein error aayi: {str(e)}")
+
+
+# --- NEW FEATURE 2: ADMIN BROADCAST FEATURE ---
+@bot.message_handler(commands=["broadcast"])
+def broadcast_command(message):
+  user_id = message.from_user.id
+  if user_id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
+    return
+
+  # Message extract karein jo broadcast karna hai
+  text_parts = message.text.split(maxsplit=1)
+  if len(text_parts) < 2:
+    bot.reply_to(
+        message,
+        "❌ Sahi format use karein:\n`/broadcast Aapka message yahan likhein`",
+        parse_mode="Markdown",
+    )
+    return
+
+  broadcast_text = text_parts[1]
+
+  # Database se saare registered users ke IDs nikalain
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT user_id FROM users")
+  all_users = cursor.fetchall()
+  cursor.close()
+  conn.close()
+
+  success_count = 0
+  fail_count = 0
+
+  sent_msg = bot.reply_to(
+      message,
+      f"📢 Broadcast shuru ho gaya hai... Total users: {len(all_users)}",
+  )
+
+  for row in all_users:
+    uid = row[0]
+    try:
+      bot.send_message(
+          uid,
+          f"📢 **Announcement:**\n\n{broadcast_text}",
+          parse_mode="Markdown",
+      )
+      success_count.append(1) if isinstance(success_count, list) else None
+      # Simple counter increment
+      success_count = (
+          success_count + 1 if isinstance(success_count, int) else 1
+      )
+      time.sleep(0.1)  # Telegram rate limit se bachne ke liye chota gap
+    except Exception:
+      fail_count += 1
+
+  bot.send_message(
+      message.chat.id,
+      f"✅ **Broadcast Completed!**\n\nSuccessful: `{success_count}`\nFailed"
+      f" (Blocked/Inactive): `{fail_count}`",
+      parse_mode="Markdown",
+  )
+
+
+# --- NEW FEATURE 3: DETAILED BALANCE MANAGEMENT (ADD / CUT BALANCE) ---
+@bot.message_handler(commands=["addbal"])
+def add_balance_admin(message):
+  if message.from_user.id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
+    return
+  parts = message.text.split()
+  if len(parts) < 3:
+    bot.reply_to(
+        message,
+        "❌ Sahi format: `/addbal <User_ID> <Amount>`\nJaise: `/addbal"
+        " 123456789 50`",
+        parse_mode="Markdown",
+    )
+    return
+  try:
+    target_user_id = int(parts[1])
+    amount = float(parts[2])
+    register_user(target_user_id)  ensure user exists
+    update_balance(target_user_id, amount)
+    bot.reply_to(
+        message,
+        f"✅ Success! User `{target_user_id}` ke account mein `₹{amount}` add"
+        " kar diye gaye hain.",
+        parse_mode="Markdown",
+    )
+    try:
+      bot.send_message(
+          target_user_id,
+          f"💰 **Balance Updated:** Admin ne aapke wallet mein `₹{amount}` add"
+          " kar diye hain!",
+          parse_mode="Markdown",
+      )
+    except:
+      pass
+  except ValueError:
+    bot.reply_to(
+        message,
+        "❌ Kripya valid User ID aur Amount dalein.",
+        parse_mode="Markdown",
+    )
+
+
+@bot.message_handler(commands=["cutbal"])
+def cut_balance_admin(message):
+  if message.from_user.id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
+    return
+  parts = message.text.split()
+  if len(parts) < 3:
+    bot.reply_to(
+        message,
+        "❌ Sahi format: `/cutbal <User_ID> <Amount>`\nJaise: `/cutbal"
+        " 123456789 50`",
+        parse_mode="Markdown",
+    )
+    return
+  try:
+    target_user_id = int(parts[1])
+    amount = float(parts[2])
+    update_balance(target_user_id, -amount)
+    bot.reply_to(
+        message,
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        " liye gaye hain.",
+        parse_mode="Markdown",
+    )
+    try:
+      bot.send_message(
+          target_user_id,
+          f"⚠️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
+          " liye hain.",
+          parse_mode="Markdown",
+      )
+    except:
+      pass
+  except ValueError:
+    bot.reply_to(
+        message,
+        "❌ Kripya valid User ID aur Amount dalein.",
+        parse_mode="Markdown",
+    )
+
+
 def ask_amount_logic(chat_id, first_name):
   msg = bot.send_message(
       chat_id,
@@ -395,8 +626,7 @@ def callback_listener(call):
 
   elif call.data.startswith("plat_"):
     bot.answer_callback_query(call.id, "Loading services...")
-    
-    # Parse callback_data: plat_{platform_name}_{page}
+
     parts = call.data.split("_")
     page = int(parts[-1])
     platform_name = "_".join(parts[1:-1])
@@ -447,7 +677,7 @@ def callback_listener(call):
     current_services = matched_services[start_idx:end_idx]
 
     list_text = f"📋 *{platform_name.upper()} SERVICES LIST* (Page {page+1}/{total_pages}) 📋\n\n```text\n"
-    
+
     markup = types.InlineKeyboardMarkup()
     buttons = []
 
@@ -466,21 +696,23 @@ def callback_listener(call):
 
     list_text += "```\n👇 *Service select karein ya page badlein:*"
 
-    # Add order buttons (1 per row for clarity)
     for btn in buttons:
       markup.add(btn)
 
-    # Pagination navigation buttons
     nav_buttons = []
     if page > 0:
       nav_buttons.append(
-          types.InlineKeyboardButton("⬅️ Prev", callback_data=f"plat_{platform_name}_{page-1}")
+          types.InlineKeyboardButton(
+              "⬅️ Prev", callback_data=f"plat_{platform_name}_{page-1}"
+          )
       )
     if page < total_pages - 1:
       nav_buttons.append(
-          types.InlineKeyboardButton("Next ➡️", callback_data=f"plat_{platform_name}_{page+1}")
+          types.InlineKeyboardButton(
+              "Next ➡️", callback_data=f"plat_{platform_name}_{page+1}"
+          )
       )
-    
+
     if nav_buttons:
       markup.row(*nav_buttons)
 
