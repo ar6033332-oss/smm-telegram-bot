@@ -3,7 +3,7 @@ import json
 import os
 import threading
 import time
-from flask import Flask, request
+from flask import Flask, abort, request
 import psycopg2
 import razorpay
 import requests
@@ -32,6 +32,9 @@ ADMIN_USERNAME = "@Socialpookiehelp"
 # Razorpay Credentials
 RAZORPAY_KEY_ID = "rzp_test_TeqKl9A9tWKnZI"
 RAZORPAY_KEY_SECRET = "wLcq7AuD25CXDasBXn1teMAg"
+RAZORPAY_WEBHOOK_SECRET = (
+    "Aapka_Razorpay_Webhook_Secret_Yahan_Dalein"  # Optional secure secret
+)
 
 razorpay_client = razorpay.Client(
     auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
@@ -240,7 +243,7 @@ def start_handler(message):
 
 @bot.message_handler(commands=["addfunds"])
 def addfunds_command(message):
-  ask_amount_logic(message.chat.id, message.from_user.first_name)
+  ask_amount_logic(message.chat.id, message.from_user.id, message.from_user.first_name)
 
 
 @bot.message_handler(commands=["setmargin"])
@@ -281,7 +284,6 @@ def set_margin_command(message):
     bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
 
 
-# --- FEATURE 1: ORDER STATUS TRACKING & AUTO-REFUND ---
 @bot.message_handler(commands=["status"])
 def status_command(message):
   parts = message.text.split()
@@ -362,7 +364,6 @@ def status_command(message):
     bot.reply_to(message, f"❌ Status fetch karne mein error aayi: {str(e)}")
 
 
-# --- FEATURE 2: ADMIN BROADCAST FEATURE ---
 @bot.message_handler(commands=["broadcast"])
 def broadcast_command(message):
   user_id = message.from_user.id
@@ -417,7 +418,6 @@ def broadcast_command(message):
   )
 
 
-# --- FEATURE 3: DETAILED BALANCE MANAGEMENT ---
 @bot.message_handler(commands=["addbal"])
 def add_balance_admin(message):
   if message.from_user.id != ADMIN_ID:
@@ -435,7 +435,7 @@ def add_balance_admin(message):
   try:
     target_user_id = int(parts[1])
     amount = float(parts[2])
-    register_user(target_user_id)  # ensure user exists (Fixed error here)
+    register_user(target_user_id)
     update_balance(target_user_id, amount)
     bot.reply_to(
         message,
@@ -501,7 +501,9 @@ def cut_balance_admin(message):
     )
 
 
-def ask_amount_logic(chat_id, first_name):
+def ask_amount_logic(chat_id, user_id, first_name):
+  # Store user_id temporarily for payment link amount collection
+  user_order_state[user_id] = {"expecting_amount": True}
   msg = bot.send_message(
       chat_id,
       "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)",
@@ -511,7 +513,9 @@ def ask_amount_logic(chat_id, first_name):
 
 
 def process_payment_amount(message):
+  user_id = message.from_user.id
   if message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
     handle_menu_buttons(message)
     return
   try:
@@ -519,22 +523,29 @@ def process_payment_amount(message):
     if amount_rs < 10:
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
+
+    # Creating Payment Link with user_id inside notes for Webhook tracking
     payment_link = razorpay_client.payment_link.create({
         "amount": int(amount_rs * 100),
         "currency": "INR",
-        "description": f"Add ₹{amount_rs} to Wallet",
+        "description": f"Add ₹{amount_rs} to SMM Wallet",
         "customer": {
             "name": str(message.from_user.first_name),
             "contact": "9876543210",
             "email": "user@example.com",
         },
+        "notes": {"user_id": str(user_id)},
     })
+
+    clear_user_state(user_id)
     bot.reply_to(
         message,
-        f"💳 **Payment Link:**\n\n🔗 {payment_link.get('short_url')}",
+        f"💳 **Payment Link Generated:**\n\n🔗 {payment_link.get('short_url')}\n\n*Payment"
+        " karne ke baad aapka balance automatic update ho jayega!*",
         parse_mode="Markdown",
     )
   except Exception as e:
+    clear_user_state(user_id)
     bot.reply_to(message, f"Error: {str(e)}")
 
 
@@ -553,7 +564,8 @@ def handle_menu_buttons(message):
         reply_markup=platforms_inline_menu(),
     )
   elif text == "💰 My Balance":
-    bal = get_user(user_id)[0]
+    bal_row = get_user(user_id)
+    bal = bal_row[0] if bal_row else 0.0
     bot.reply_to(
         message,
         f"👤 **User ID:** `{user_id}`\n💰 **Balance:** ₹{bal:.2f}",
@@ -611,7 +623,7 @@ def callback_listener(call):
 
   if call.data == "pay_razorpay":
     bot.answer_callback_query(call.id)
-    ask_amount_logic(chat_id, call.from_user.first_name)
+    ask_amount_logic(chat_id, user_id, call.from_user.first_name)
 
   elif call.data.startswith("plat_"):
     bot.answer_callback_query(call.id, "Loading services...")
@@ -737,10 +749,11 @@ def callback_listener(call):
 def process_order_link(message):
   user_id = message.from_user.id
   if message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
     handle_menu_buttons(message)
     return
 
-  if user_id not in user_order_state:
+  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
     bot.reply_to(message, "❌ Session expired. Dobara start karein.")
     return
 
@@ -756,10 +769,11 @@ def process_order_link(message):
 def process_order_quantity(message):
   user_id = message.from_user.id
   if message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
     handle_menu_buttons(message)
     return
 
-  if user_id not in user_order_state:
+  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
     bot.reply_to(message, "❌ Session expired. Dobara start karein.")
     return
 
@@ -860,14 +874,14 @@ def process_order_quantity(message):
     )
 
 
-# ==================== FLASK WEBHOOK ROUTE ====================
+# ==================== FLASK WEBHOOK ROUTES ====================
 @app.route("/")
 def home():
   return "Bot is running via Webhook!"
 
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
+def telegram_webhook():
   if request.headers.get("content-type") == "application/json":
     json_string = request.get_data().decode("utf-8")
     update = types.Update.de_json(json_string)
@@ -875,6 +889,51 @@ def webhook():
     return "OK", 200
   else:
     return "Forbidden", 403
+
+
+# Razorpay Webhook Route for Auto-Adding Funds
+@app.route("/razorpay-webhook", methods=["POST"])
+def razorpay_webhook():
+  event_data = request.get_json()
+  if not event_data:
+    abort(400)
+
+  event = event_data.get("event")
+
+  # When a payment link is paid successfully
+  if event == "payment_link.paid":
+    payment_link_entity = (
+        event_data.get("payload", {})
+        .get("payment_link", {})
+        .get("entity", {})
+    )
+    notes = payment_link_entity.get("notes", {})
+    user_id_str = notes.get("user_id")
+
+    if user_id_str:
+      try:
+        user_id = int(user_id_str)
+        # Amount in paise converted to rupees
+        amount_paid = float(payment_link_entity.get("amount_paid", 0)) / 100.0
+
+        register_user(user_id)
+        update_balance(user_id, amount_paid)
+
+        # Notify user on Telegram automatically
+        try:
+          bot.send_message(
+              user_id,
+              f"🎉 **Payment Successful!**\n\n`₹{amount_paid}` successfully"
+              " aapke wallet mein add kar diye gaye hain!",
+              parse_mode="Markdown",
+          )
+        except Exception as e:
+          print("Failed to send Telegram notification:", e)
+
+      except Exception as e:
+        print("Webhook database update error:", e)
+
+  return "OK", 200
 
 
 def keep_alive():
