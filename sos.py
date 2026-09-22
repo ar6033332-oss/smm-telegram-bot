@@ -12,7 +12,7 @@ from telebot import types
 
 # ==================== CONFIGURATION ====================
 BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
-RENDER_URL = "[https://smm-telegram-bot-w9s6.onrender.com](https://smm-telegram-bot-w9s6.onrender.com)"
+RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
 
 # XMedia SMM API Details
 SMM_API_URL = "https://xmediasmm.in/api/v2"
