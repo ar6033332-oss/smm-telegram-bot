@@ -227,7 +227,7 @@ def callback_listener(call):
 
     elif call.data.startswith("buy_"):
         user_order_state[user_id] = {'service_id': call.data.replace("buy_", ""), 'step': 'wait_link'}
-        msg = bot.send_message(chat_id, "🔗 **Send your Link:**", parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "🔗 **Send your Link:**", parse_message="Markdown")
         bot.register_next_step_handler(msg, process_link)
 
 def process_link(message):
@@ -291,6 +291,7 @@ def home():
 if __name__ == '__main__':
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))).start()
     bot.remove_webhook()
+    bot.reset_webhook()  # Purane conflicts saaf karne ke liye
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
