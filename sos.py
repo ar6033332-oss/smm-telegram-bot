@@ -12,7 +12,7 @@ from telebot import types
 
 # ==================== CONFIGURATION ====================
 BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
-RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
+RENDER_URL = "[https://smm-telegram-bot-w9s6.onrender.com](https://smm-telegram-bot-w9s6.onrender.com)"
 
 # XMedia SMM API Details
 SMM_API_URL = "https://xmediasmm.in/api/v2"
@@ -21,7 +21,7 @@ SMM_API_KEY = "08a1a294cbd54b19bdb1e5cf3c2682dc"
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
 QR_CODE_URL = (
-    "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
+    "[https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg](https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg)"
 )
 ADMIN_USERNAME = "@Socialpookiehelp"
 
@@ -422,22 +422,37 @@ def callback_listener(call):
       )
       return
 
-    # Sirf pehli 10 services dikhayenge taaki chat clean rahe
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    for s in matched_services[:10]:
+    # Ek hi code block me saari services aur poore naam dikhane ke liye format
+    list_text = f"📋 *{platform_name.upper()} SERVICES LIST* 📋\n\n```text\n"
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+
+    for i, s in enumerate(matched_services[:8], 1):
       selling_price = calculate_selling_price(s.get("rate", 0))
-      btn_text = f"{s.get('name')} (₹{selling_price}/1K)"
-      markup.add(
+      full_name = s.get("name")
+      service_id = str(s.get("service"))
+
+      # Code block ke andar poora naam aur rate clean format me aayega
+      list_text += f"{i}. ID:{service_id} | ₹{selling_price}/1K\n   {full_name}\n\n"
+
+      # Buttons bilkul chote aur clean rakhe gaye hain taaki text na kate
+      buttons.append(
           types.InlineKeyboardButton(
-              btn_text, callback_data=f"srv_{s.get('service')}"
+              f"🛒 #{i} (ID: {service_id})", callback_data=f"srv_{service_id}"
           )
       )
 
+    list_text += "```\n👇 *Niche diye gaye button se apni service chunein:*"
+
+    for i in range(0, len(buttons), 2):
+      if i + 1 < len(buttons):
+        markup.add(buttons[i], buttons[i + 1])
+      else:
+        markup.add(buttons[i])
+
     bot.send_message(
-        chat_id,
-        "📋 **Select Service:**",
-        parse_mode="Markdown",
-        reply_markup=markup,
+        chat_id, list_text, parse_mode="Markdown", reply_markup=markup
     )
 
   elif call.data.startswith("srv_"):
