@@ -16,7 +16,7 @@ SMM_API_URL = "https://smmwiz.com/api/v2"
 SMM_API_KEY = "d0ee8a3432a6770f9a6003181d308d72"
 
 ADMIN_ID = 6658716591
-UPI_ID = "arshad79@ptyes"
+UPI_ID = "8882926647-3@ybl"
 QR_CODE_URL = (
     "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
 )
@@ -532,4 +532,4 @@ if __name__ == "__main__":
   bot.remove_webhook()
   bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
   port = int(os.environ.get("PORT", 10000))
-  app.run(0.0.0.0, port=port)
+  app.run(host="0.0.0.0", port=port)
