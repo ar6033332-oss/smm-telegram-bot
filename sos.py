@@ -12,7 +12,11 @@ from telebot import types
 
 # ==================== CONFIGURATION ====================
 BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
+
 RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
+RENDER_URL = RENDER_URL.strip().rstrip("/")
+if not RENDER_URL.startswith("http"):
+  RENDER_URL = f"https://{RENDER_URL}"
 
 # XMedia SMM API Details
 SMM_API_URL = "https://xmediasmm.in/api/v2"
@@ -21,7 +25,7 @@ SMM_API_KEY = "08a1a294cbd54b19bdb1e5cf3c2682dc"
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
 QR_CODE_URL = (
-    "[https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg](https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg)"
+    "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
 )
 ADMIN_USERNAME = "@Socialpookiehelp"
 
@@ -201,18 +205,20 @@ def platforms_inline_menu():
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
       types.InlineKeyboardButton(
-          "👑 IG Followers Only", callback_data="plat_ig_followers"
+          "👑 IG Followers Only", callback_data="plat_ig_followers_0"
       )
   )
   markup.add(
       types.InlineKeyboardButton(
-          "📸 Instagram All", callback_data="plat_instagram"
+          "📸 Instagram All", callback_data="plat_instagram_0"
       ),
-      types.InlineKeyboardButton("✈️ Telegram", callback_data="plat_telegram"),
-      types.InlineKeyboardButton("▶️ YouTube", callback_data="plat_youtube"),
-      types.InlineKeyboardButton("📘 Facebook", callback_data="plat_facebook"),
-      types.InlineKeyboardButton("🐦 Twitter (X)", callback_data="plat_twitter"),
-      types.InlineKeyboardButton("💬 WhatsApp", callback_data="plat_whatsapp"),
+      types.InlineKeyboardButton("✈️ Telegram", callback_data="plat_telegram_0"),
+      types.InlineKeyboardButton("▶️ YouTube", callback_data="plat_youtube_0"),
+      types.InlineKeyboardButton("📘 Facebook", callback_data="plat_facebook_0"),
+      types.InlineKeyboardButton(
+          "🐦 Twitter (X)", callback_data="plat_twitter_0"
+      ),
+      types.InlineKeyboardButton("💬 WhatsApp", callback_data="plat_whatsapp_0"),
   )
   return markup
 
@@ -388,8 +394,12 @@ def callback_listener(call):
     ask_amount_logic(chat_id, call.from_user.first_name)
 
   elif call.data.startswith("plat_"):
-    platform_name = call.data.replace("plat_", "").lower()
     bot.answer_callback_query(call.id, "Loading services...")
+    
+    # Parse callback_data: plat_{platform_name}_{page}
+    parts = call.data.split("_")
+    page = int(parts[-1])
+    platform_name = "_".join(parts[1:-1])
 
     services = get_cached_smm_services()
     matched_services = []
@@ -415,45 +425,80 @@ def callback_listener(call):
         matched_services.append(s)
 
     if not matched_services:
-      bot.send_message(
-          chat_id,
+      bot.edit_message_text(
           "❌ Is category mein koi service nahi mili.",
+          chat_id=chat_id,
+          message_id=call.message.message_id,
           parse_mode="Markdown",
       )
       return
 
-    # Ek hi code block me saari services aur poore naam dikhane ke liye format
-    list_text = f"📋 *{platform_name.upper()} SERVICES LIST* 📋\n\n```text\n"
+    ITEMS_PER_PAGE = 5
+    total_services = len(matched_services)
+    total_pages = (total_services + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+    if page >= total_pages:
+      page = total_pages - 1
+    if page < 0:
+      page = 0
+
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    current_services = matched_services[start_idx:end_idx]
+
+    list_text = f"📋 *{platform_name.upper()} SERVICES LIST* (Page {page+1}/{total_pages}) 📋\n\n```text\n"
     
-    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup = types.InlineKeyboardMarkup()
     buttons = []
 
-    for i, s in enumerate(matched_services[:8], 1):
+    for idx, s in enumerate(current_services, start=start_idx + 1):
       selling_price = calculate_selling_price(s.get("rate", 0))
       full_name = s.get("name")
       service_id = str(s.get("service"))
 
-      # Code block ke andar poora naam aur rate clean format me aayega
-      list_text += f"{i}. ID:{service_id} | ₹{selling_price}/1K\n   {full_name}\n\n"
+      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {full_name}\n\n"
 
-      # Buttons bilkul chote aur clean rakhe gaye hain taaki text na kate
       buttons.append(
           types.InlineKeyboardButton(
-              f"🛒 #{i} (ID: {service_id})", callback_data=f"srv_{service_id}"
+              f"🛒 #{idx} (ID: {service_id})", callback_data=f"srv_{service_id}"
           )
       )
 
-    list_text += "```\n👇 *Niche diye gaye button se apni service chunein:*"
+    list_text += "```\n👇 *Service select karein ya page badlein:*"
 
-    for i in range(0, len(buttons), 2):
-      if i + 1 < len(buttons):
-        markup.add(buttons[i], buttons[i + 1])
-      else:
-        markup.add(buttons[i])
+    # Add order buttons (1 per row for clarity)
+    for btn in buttons:
+      markup.add(btn)
 
-    bot.send_message(
-        chat_id, list_text, parse_mode="Markdown", reply_markup=markup
-    )
+    # Pagination navigation buttons
+    nav_buttons = []
+    if page > 0:
+      nav_buttons.append(
+          types.InlineKeyboardButton("⬅️ Prev", callback_data=f"plat_{platform_name}_{page-1}")
+      )
+    if page < total_pages - 1:
+      nav_buttons.append(
+          types.InlineKeyboardButton("Next ➡️", callback_data=f"plat_{platform_name}_{page+1}")
+      )
+    
+    if nav_buttons:
+      markup.row(*nav_buttons)
+
+    try:
+      bot.edit_message_text(
+          list_text,
+          chat_id=chat_id,
+          message_id=call.message.message_id,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    except Exception:
+      bot.send_message(
+          chat_id,
+          list_text,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
 
   elif call.data.startswith("srv_"):
     service_id = call.data.replace("srv_", "")
