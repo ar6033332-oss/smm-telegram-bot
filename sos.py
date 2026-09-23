@@ -33,7 +33,9 @@ ADMIN_USERNAME = "@Socialpookiehelp"
 # Razorpay Credentials
 RAZORPAY_KEY_ID = "rzp_test_TeqKl9A9tWKnZI"
 RAZORPAY_KEY_SECRET = "wLcq7AuD25CXDasBXn1teMAg"
-RAZORPAY_WEBHOOK_SECRET = "Aapka_Razorpay_Webhook_Secret_Yahan_Dalein"
+RAZORPAY_WEBHOOK_SECRET = (
+    "Aapka_Razorpay_Webhook_Secret_Yahan_Dalein"  # Optional secure secret
+)
 
 razorpay_client = razorpay.Client(
     auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
@@ -274,9 +276,7 @@ def start_handler(message):
 
 @bot.message_handler(commands=["addfunds"])
 def addfunds_command(message):
-  ask_amount_logic(
-      message.chat.id, message.from_user.id, message.from_user.first_name
-  )
+  ask_amount_logic(message.chat.id, message.from_user.id, message.from_user.first_name)
 
 
 @bot.message_handler(commands=["setmargin"])
@@ -520,7 +520,7 @@ def cut_balance_admin(message):
     try:
       bot.send_message(
           target_user_id,
-          f"⚠️ **Balance Deducted:** Admin ne aapke wallet से `₹{amount}` kaat"
+          f"⚠️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
           " liye hain.",
           parse_mode="Markdown",
       )
@@ -735,47 +735,248 @@ def callback_listener(call):
     if page > 0:
       nav_buttons.append(
           types.InlineKeyboardButton(
-              "⬅️ Previous", callback_data=f"plat_{platform_name}_{page-1}"
+              "⬅️ Prev", callback_data=f"plat_{platform_name}_{page-1}"
           )
       )
     if page < total_pages - 1:
       nav_buttons.append(
           types.InlineKeyboardButton(
-              "➡️ Next", callback_data=f"plat_{platform_name}_{page+1}"
+              "Next ➡️", callback_data=f"plat_{platform_name}_{page+1}"
           )
       )
+
     if nav_buttons:
       markup.row(*nav_buttons)
 
-    bot.edit_message_text(
-        list_text,
-        chat_id=chat_id,
-        message_id=call.message.message_id,
+    try:
+      bot.edit_message_text(
+          list_text,
+          chat_id=chat_id,
+          message_id=call.message.message_id,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    except Exception:
+      bot.send_message(
+          chat_id,
+          list_text,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+
+  elif call.data.startswith("srv_"):
+    service_id = call.data.replace("srv_", "")
+    bot.answer_callback_query(call.id)
+    user_order_state[user_id] = {"service_id": service_id}
+
+    msg = bot.send_message(
+        chat_id,
+        "🔗 **Ab apna Link bhejein** (jahan followers/likes chahiye):",
         parse_mode="Markdown",
-        reply_markup=markup,
+    )
+    bot.register_next_step_handler(msg, process_order_link)
+
+
+def process_order_link(message):
+  user_id = message.from_user.id
+  if message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
+    return
+
+  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
+    bot.reply_to(message, "❌ Session expired. Dobara start karein.")
+    return
+
+  user_order_state[user_id]["link"] = message.text.strip()
+  msg = bot.send_message(
+      message.chat.id,
+      "📊 **Quantity kitni chahiye?** (Number me likhein, jaise: 1000)",
+      parse_mode="Markdown",
+  )
+  bot.register_next_step_handler(msg, process_order_quantity)
+
+
+def process_order_quantity(message):
+  user_id = message.from_user.id
+  if message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
+    return
+
+  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
+    bot.reply_to(message, "❌ Session expired. Dobara start karein.")
+    return
+
+  try:
+    quantity = int(message.text.strip())
+    if quantity <= 0:
+      bot.reply_to(message, "❌ Quantity 0 se zyada honi chahiye.")
+      return
+
+    state = user_order_state[user_id]
+    service_id = state["service_id"]
+    link = state["link"]
+
+    services = get_cached_smm_services()
+    selected_service = None
+    for s in services:
+      if str(s.get("service")) == str(service_id):
+        selected_service = s
+        break
+
+    if not selected_service:
+      bot.reply_to(message, "❌ Selected service not found.")
+      clear_user_state(user_id)
+      return
+
+    wholesale_rate = float(selected_service.get("rate", 0))
+    unit_selling_price = calculate_selling_price(wholesale_rate)
+    total_cost = round((unit_selling_price * quantity) / 1000.0, 2)
+
+    user_row = get_user(user_id)
+    current_balance = user_row[0] if user_row else 0.0
+
+    if current_balance < total_cost:
+      bot.reply_to(
+          message,
+          f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour"
+          f" Balance: ₹{current_balance:.2f}\n\nPehle Funds Add karein.",
+          parse_mode="Markdown",
+      )
+      clear_user_state(user_id)
+      return
+
+    smm_payload = {
+        "key": SMM_API_KEY,
+        "action": "add",
+        "service": service_id,
+        "link": link,
+        "quantity": quantity,
+    }
+    smm_resp = requests.post(SMM_API_URL, data=smm_payload, timeout=10)
+    smm_data = smm_resp.json()
+
+    if "order" in smm_data:
+      smm_order_id = str(smm_data["order"])
+      update_balance(user_id, -total_cost)
+
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "INSERT INTO orders (order_id, user_id, service_name, link, quantity,"
+          " cost, date_time) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+          (
+              smm_order_id,
+              user_id,
+              selected_service.get("name"),
+              link,
+              quantity,
+              total_cost,
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+          ),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
+
+      bot.reply_to(
+          message,
+          f"✅ **Order Placed Successfully!**\n\n🆔 Order ID:"
+          f" `{smm_order_id}`\n📦 Service:"
+          f" `{selected_service.get('name')}`\n🔗 Link: `{link}`\n📊 Quantity:"
+          f" `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance:"
+          f" `₹{current_balance - total_cost:.2f}`",
+          parse_mode="Markdown",
+      )
+    else:
+      error_msg = smm_data.get("error", "Unknown SMM Error")
+      bot.reply_to(
+          message,
+          f"❌ **SMM Panel Error:**\n`{error_msg}`",
+          parse_mode="Markdown",
+      )
+
+    clear_user_state(user_id)
+
+  except ValueError:
+    bot.reply_to(
+        message, "❌ Kripya valid number dalein (jaise: 500 ya 1000)."
     )
 
 
-# ==================== FLASK ROUTES & WEB SERVER ====================
+# ==================== FLASK WEBHOOK ROUTES ====================
 @app.route("/")
 def home():
-  return "Bot is running successfully!"
+  return "Bot is running via Webhook!"
 
 
-def run_bot():
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def telegram_webhook():
+  if request.headers.get("content-type") == "application/json":
+    json_string = request.get_data().decode("utf-8")
+    update = types.Update.de_json(json_string)
+    bot.process_new_updates([update])
+    return "OK", 200
+  else:
+    return "Forbidden", 403
+
+
+@app.route("/razorpay-webhook", methods=["POST"])
+def razorpay_webhook():
+  event_data = request.get_json()
+  if not event_data:
+    abort(400)
+
+  event = event_data.get("event")
+
+  if event == "payment_link.paid":
+    payment_link_entity = (
+        event_data.get("payload", {})
+        .get("payment_link", {})
+        .get("entity", {})
+    )
+    notes = payment_link_entity.get("notes", {})
+    user_id_str = notes.get("user_id")
+
+    if user_id_str:
+      try:
+        user_id = int(user_id_str)
+        amount_paid = float(payment_link_entity.get("amount_paid", 0)) / 100.0
+
+        register_user(user_id)
+        update_balance(user_id, amount_paid)
+
+        try:
+          bot.send_message(
+              user_id,
+              f"🎉 **Payment Successful!**\n\n`₹{amount_paid}` successfully"
+              " aapke wallet mein add kar diye gaye hain!",
+              parse_mode="Markdown",
+          )
+        except Exception as e:
+          print("Failed to send Telegram notification:", e)
+
+      except Exception as e:
+        print("Webhook database update error:", e)
+
+  return "OK", 200
+
+
+def keep_alive():
   while True:
     try:
-      bot.infinity_polling(timeout=60, long_polling_timeout=60)
-    except Exception as e:
-      print(f"Polling error: {e}")
-      time.sleep(5)
+      requests.get(RENDER_URL, timeout=5)
+    except:
+      pass
+    time.sleep(300)
 
 
 if __name__ == "__main__":
-  # Start Background Threads
   threading.Thread(target=fetch_services_background, daemon=True).start()
-  threading.Thread(target=run_bot, daemon=True).start()
+  threading.Thread(target=keep_alive, daemon=True).start()
 
-  # Run Flask Web Server for Render
-  port = int(os.environ.get("PORT", 5000))
+  bot.remove_webhook()
+  bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+  port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
