@@ -520,7 +520,7 @@ def cut_balance_admin(message):
     try:
       bot.send_message(
           target_user_id,
-          f"⚠️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
+          f"⚠️ **Balance Deducted:** Admin ne aapke wallet से `₹{amount}` kaat"
           " liye hain.",
           parse_mode="Markdown",
       )
@@ -754,3 +754,28 @@ def callback_listener(call):
         parse_mode="Markdown",
         reply_markup=markup,
     )
+
+
+# ==================== FLASK ROUTES & WEB SERVER ====================
+@app.route("/")
+def home():
+  return "Bot is running successfully!"
+
+
+def run_bot():
+  while True:
+    try:
+      bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    except Exception as e:
+      print(f"Polling error: {e}")
+      time.sleep(5)
+
+
+if __name__ == "__main__":
+  # Start Background Threads
+  threading.Thread(target=fetch_services_background, daemon=True).start()
+  threading.Thread(target=run_bot, daemon=True).start()
+
+  # Run Flask Web Server for Render
+  port = int(os.environ.get("PORT", 5000))
+  app.run(host="0.0.0.0", port=port)
