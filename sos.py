@@ -169,24 +169,15 @@ def get_user(user_id):
   return row
 
 
-def register_user(user_id, username=None, first_name=None):
+def register_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
-  
-  # Check if user already exists
-  cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
-  exists = cursor.fetchone()
-  
-  if not exists:
-    cursor.execute(
-        "INSERT INTO users (user_id, balance) VALUES (%s, 0.0) ON CONFLICT (user_id) DO NOTHING",
-        (user_id,),
-    )
-    conn.commit()
-    print(f"🚀 [NEW USER ADDED] User ID: {user_id} | Name: {first_name} | Username: @{username}")
-  else:
-    print(f"👤 [EXISTING USER] User ID: {user_id} started the bot.")
-    
+  cursor.execute(
+      "INSERT INTO users (user_id, balance) VALUES (%s, 0.0) ON CONFLICT"
+      " (user_id) DO NOTHING",
+      (user_id,),
+  )
+  conn.commit()
   cursor.close()
   conn.close()
 
@@ -268,19 +259,14 @@ def platforms_inline_menu():
 @bot.message_handler(commands=["start"])
 def start_handler(message):
   user_id = message.from_user.id
-  first_name = message.from_user.first_name
-  username = message.from_user.username
-  
   clear_user_state(user_id)
-  
-  # Register user and print/log it automatically
-  register_user(user_id, username, first_name)
+  register_user(user_id)
 
   total_orders = get_updated_count()
 
   bot.send_message(
       message.chat.id,
-      f"✨ **Namaste {first_name}!** ✨\n\n"
+      f"✨ **Namaste {message.from_user.first_name}!** ✨\n\n"
       f"🚀 Total Successful Orders: **{total_orders:,}+**\n\n"
       "Welcome to Social Media Services Bot!",
       parse_mode="Markdown",
@@ -599,7 +585,7 @@ def handle_menu_buttons(message):
   user_id = message.from_user.id
   text = message.text
   clear_user_state(user_id)
-  register_user(user_id, message.from_user.username, message.from_user.first_name)
+  register_user(user_id)
 
   if text == "🛍 Select Platform":
     bot.send_message(
