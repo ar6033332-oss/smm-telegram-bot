@@ -726,4 +726,31 @@ def callback_listener(call):
           )
       )
 
-    list_text += "
+    list_text += "```\n👇 *Service select karein ya page badlein:*"
+
+    for btn in buttons:
+      markup.add(btn)
+
+    nav_buttons = []
+    if page > 0:
+      nav_buttons.append(
+          types.InlineKeyboardButton(
+              "⬅️ Previous", callback_data=f"plat_{platform_name}_{page-1}"
+          )
+      )
+    if page < total_pages - 1:
+      nav_buttons.append(
+          types.InlineKeyboardButton(
+              "➡️ Next", callback_data=f"plat_{platform_name}_{page+1}"
+          )
+      )
+    if nav_buttons:
+      markup.row(*nav_buttons)
+
+    bot.edit_message_text(
+        list_text,
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
