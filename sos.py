@@ -12,7 +12,7 @@ import telebot
 from telebot import types
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8203717604:AAFToIEk11Le36Dg8pKxGSrLqH_bwlconJA"
+BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
 
 RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
 RENDER_URL = RENDER_URL.strip().rstrip("/")
@@ -20,8 +20,8 @@ if not RENDER_URL.startswith("http"):
   RENDER_URL = f"https://{RENDER_URL}"
 
 # XMedia SMM API Details
-SMM_API_URL = "https://xmediasmm.com/api/v2"
-SMM_API_KEY = "Aapki_XMedia_API_Key_Yahan_Dalein"
+SMM_API_URL = "https://xmediasmm.in/api/v2"
+SMM_API_KEY = "08a1a294cbd54b19bdb1e5cf3c2682dc"
 
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
