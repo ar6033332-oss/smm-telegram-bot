@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import os
+import random
 import threading
 import time
 from flask import Flask, abort, request
@@ -11,7 +12,7 @@ import telebot
 from telebot import types
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8203717604:AAEXt0oAR7FDbSoQ4pBZTZxXEQwJp6WyMOc"
+BOT_TOKEN = "8203717604:AAFToIEk11Le36Dg8pKxGSrLqH_bwlconJA"
 
 RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
 RENDER_URL = RENDER_URL.strip().rstrip("/")
@@ -19,8 +20,8 @@ if not RENDER_URL.startswith("http"):
   RENDER_URL = f"https://{RENDER_URL}"
 
 # XMedia SMM API Details
-SMM_API_URL = "https://xmediasmm.in/api/v2"
-SMM_API_KEY = "08a1a294cbd54b19bdb1e5cf3c2682dc"
+SMM_API_URL = "https://xmediasmm.com/api/v2"
+SMM_API_KEY = "Aapki_XMedia_API_Key_Yahan_Dalein"
 
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
@@ -93,6 +94,34 @@ def init_db():
 
 
 init_db()
+
+
+# ==================== DYNAMIC ORDER COUNT LOGIC ====================
+DATA_FILE = "bot_stats.json"
+
+
+def get_updated_count():
+  try:
+    if os.path.exists(DATA_FILE):
+      with open(DATA_FILE, "r") as f:
+        data = json.load(f)
+    else:
+      data = {"count": 70000, "last_updated": str(datetime.now().date())}
+
+    today_str = str(datetime.now().date())
+
+    if data.get("last_updated") != today_str:
+      increment = random.randint(300, 700)
+      data["count"] += increment
+      data["last_updated"] = today_str
+
+      with open(DATA_FILE, "w") as f:
+        json.dump(data, f)
+
+    return data.get("count", 70000)
+  except Exception as e:
+    print("Stats error:", e)
+    return 70000
 
 
 # ==================== BACKGROUND SERVICE FETCHER ====================
@@ -232,10 +261,14 @@ def start_handler(message):
   user_id = message.from_user.id
   clear_user_state(user_id)
   register_user(user_id)
+
+  total_orders = get_updated_count()
+
   bot.send_message(
       message.chat.id,
-      f"✨ **Namaste {message.from_user.first_name}!** ✨\n\nWelcome to Social"
-      " Media Services Bot!",
+      f"✨ **Namaste {message.from_user.first_name}!** ✨\n\n"
+      f"🚀 Total Successful Orders: **{total_orders:,}+**\n\n"
+      "Welcome to Social Media Services Bot!",
       parse_mode="Markdown",
       reply_markup=main_menu(),
   )
@@ -502,7 +535,6 @@ def cut_balance_admin(message):
 
 
 def ask_amount_logic(chat_id, user_id, first_name):
-  # Store user_id temporarily for payment link amount collection
   user_order_state[user_id] = {"expecting_amount": True}
   msg = bot.send_message(
       chat_id,
@@ -524,7 +556,6 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    # Creating Payment Link with user_id inside notes for Webhook tracking
     payment_link = razorpay_client.payment_link.create({
         "amount": int(amount_rs * 100),
         "currency": "INR",
@@ -891,7 +922,6 @@ def telegram_webhook():
     return "Forbidden", 403
 
 
-# Razorpay Webhook Route for Auto-Adding Funds
 @app.route("/razorpay-webhook", methods=["POST"])
 def razorpay_webhook():
   event_data = request.get_json()
@@ -900,7 +930,6 @@ def razorpay_webhook():
 
   event = event_data.get("event")
 
-  # When a payment link is paid successfully
   if event == "payment_link.paid":
     payment_link_entity = (
         event_data.get("payload", {})
@@ -913,13 +942,11 @@ def razorpay_webhook():
     if user_id_str:
       try:
         user_id = int(user_id_str)
-        # Amount in paise converted to rupees
         amount_paid = float(payment_link_entity.get("amount_paid", 0)) / 100.0
 
         register_user(user_id)
         update_balance(user_id, amount_paid)
 
-        # Notify user on Telegram automatically
         try:
           bot.send_message(
               user_id,
