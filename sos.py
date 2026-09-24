@@ -12,16 +12,26 @@ import telebot
 from telebot import types
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8203717604:AAFN6MF53SNneeb7wc-_aMBe8iStfQ05qGQ"
+# Securely load secrets from environment variables
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+SMM_API_KEY = os.environ.get("SMM_API_KEY")
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET")
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET")
 
-RENDER_URL = "https://smm-telegram-bot-w9s6.onrender.com"
+# Fallback check (Optional warning if variables are missing)
+if not BOT_TOKEN:
+  raise ValueError("BOT_TOKEN environment variable is not set!")
+
+RENDER_URL = os.environ.get(
+    "RENDER_URL", "https://smm-telegram-bot-w9s6.onrender.com"
+)
 RENDER_URL = RENDER_URL.strip().rstrip("/")
 if not RENDER_URL.startswith("http"):
   RENDER_URL = f"https://{RENDER_URL}"
 
 # XMedia SMM API Details
-SMM_API_URL = "https://xmediasmm.in/api/v2"
-SMM_API_KEY = "08a1a294cbd54b19bdb1e5cf3c2682dc"
+SMM_API_URL = "https://xmediasmm.com/api/v2"
 
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
@@ -29,13 +39,6 @@ QR_CODE_URL = (
     "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
 )
 ADMIN_USERNAME = "@Socialpookiehelp"
-
-# Razorpay Credentials
-RAZORPAY_KEY_ID = "rzp_test_TeqKl9A9tWKnZI"
-RAZORPAY_KEY_SECRET = "wLcq7AuD25CXDasBXn1teMAg"
-RAZORPAY_WEBHOOK_SECRET = (
-    "Aapka_Razorpay_Webhook_Secret_Yahan_Dalein"  # Optional secure secret
-)
 
 razorpay_client = razorpay.Client(
     auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
@@ -223,7 +226,6 @@ def get_instagram_views_margin():
 def is_instagram_views_service(service_name, category_name):
   name = (service_name or "").lower()
   cat = (category_name or "").lower()
-  # Check if it's Instagram and contains 'view' or 'views'
   if (
       "instagram" in cat
       or "ig" in cat
@@ -311,7 +313,9 @@ def start_handler(message):
 
 @bot.message_handler(commands=["addfunds"])
 def addfunds_command(message):
-  ask_amount_logic(message.chat.id, message.from_user.id, message.from_user.first_name)
+  ask_amount_logic(
+      message.chat.id, message.from_user.id, message.from_user.first_name
+  )
 
 
 @bot.message_handler(commands=["setmargin"])
