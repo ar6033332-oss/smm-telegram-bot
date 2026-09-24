@@ -591,7 +591,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -749,51 +749,25 @@ def callback_listener(call):
       name = s.get("name", "").lower()
       match = False
 
-      # Smart and Flexible Filtering Logic
+      # Strict and Separated Filtering Logic to avoid mixing
       if platform_name == "ig_followers":
         if (
-            "instagram" in cat
-            or "ig" in cat
-            or "instagram" in name
-            or "ig" in name
-        ) and (
-            "follower" in cat
-            or "followers" in cat
-            or "follower" in name
-            or "followers" in name
-        ):
+            "instagram" in cat or "ig" in cat or "instagram" in name
+        ) and ("follower" in cat or "followers" in name):
           match = True
       elif platform_name == "instagram":
         if (
-            "instagram" in cat
-            or "ig" in cat
-            or "instagram" in name
-            or "ig" in name
-        ) and not (
-            "follower" in cat
-            or "followers" in cat
-            or "follower" in name
-            or "followers" in name
-        ):
+            "instagram" in cat or "ig" in cat or "instagram" in name
+        ) and not ("follower" in cat or "followers" in name):
           match = True
       elif platform_name == "telegram":
-        if (
-            "telegram" in cat
-            or "tg" in cat
-            or "telegram" in name
-            or "tg" in name
-        ):
+        if "telegram" in cat or "tg" in cat or "telegram" in name:
           match = True
       elif platform_name == "youtube":
-        if (
-            "youtube" in cat
-            or "yt" in cat
-            or "youtube" in name
-            or "yt" in name
-        ):
+        if "youtube" in cat or "yt" in cat or "youtube" in name:
           match = True
       elif platform_name == "facebook":
-        if "facebook" in cat or "fb" in cat or "facebook" in name or "fb" in name:
+        if "facebook" in cat or "fb" in cat or "facebook" in name:
           match = True
       elif platform_name == "twitter":
         if (
@@ -801,8 +775,6 @@ def callback_listener(call):
             or "x.com" in cat
             or "twitter" in name
             or "x followers" in name
-            or "x " in name
-            or "twitter / x" in cat
         ):
           match = True
       elif platform_name == "whatsapp":
@@ -812,23 +784,10 @@ def callback_listener(call):
       if match:
         matched_services.append(s)
 
-    # Fallback search agar strict filter se services na milein
-    if not matched_services and services:
-      search_keyword = platform_name.replace("_", " ")
-      if platform_name == "ig_followers":
-        search_keyword = "follower"
-      elif platform_name == "instagram":
-        search_keyword = "instagram"
-
-      for s in services:
-        cat = s.get("category", "").lower()
-        name = s.get("name", "").lower()
-        if search_keyword in cat or search_keyword in name:
-          matched_services.append(s)
-
     if not matched_services:
       bot.edit_message_text(
-          "❌ Is category mein abhi koi service available nahi hai.",
+          "❌ Is category mein koi service nahi mili. Kripya dusri category try"
+          " karein.",
           chat_id=chat_id,
           message_id=call.message.message_id,
           parse_mode="Markdown",
