@@ -86,6 +86,10 @@ def init_db():
         "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
         " CONFLICT (key) DO NOTHING"
     )
+    cursor.execute(
+        "INSERT INTO settings (key, value) VALUES ('instagram_views_margin',"
+        " 60.0) ON CONFLICT (key) DO NOTHING"
+    )
     conn.commit()
     cursor.close()
     conn.close()
@@ -204,12 +208,43 @@ def get_profit_margin():
   return row[0] if row else 40.0
 
 
-def calculate_selling_price(wholesale_rate):
+def get_instagram_views_margin():
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT value FROM settings WHERE key = 'instagram_views_margin'"
+  )
+  row = cursor.fetchone()
+  cursor.close()
+  conn.close()
+  return row[0] if row else 60.0
+
+
+def is_instagram_views_service(service_name, category_name):
+  name = (service_name or "").lower()
+  cat = (category_name or "").lower()
+  # Check if it's Instagram and contains 'view' or 'views'
+  if (
+      "instagram" in cat
+      or "ig" in cat
+      or "instagram" in name
+      or "ig" in name
+  ) and ("view" in name or "view" in cat):
+    return True
+  return False
+
+
+def calculate_selling_price(wholesale_rate, service_name="", category_name=""):
   try:
     wholesale_rate = float(wholesale_rate)
   except:
     wholesale_rate = 0.0
-  margin_percent = get_profit_margin()
+
+  if is_instagram_views_service(service_name, category_name):
+    margin_percent = get_instagram_views_margin()
+  else:
+    margin_percent = get_profit_margin()
+
   return round(
       wholesale_rate + (wholesale_rate * (margin_percent / 100.0)), 2
   )
@@ -304,13 +339,52 @@ def set_margin_command(message):
       conn.close()
       bot.reply_to(
           message,
-          f"✅ Profit margin successfully updated to **{new_margin}%**",
+          f"✅ General profit margin successfully updated to **{new_margin}%**",
           parse_mode="Markdown",
       )
     except ValueError:
       bot.reply_to(
           message,
           "❌ Kripya valid number dalein, jaise: `/setmargin 30`",
+          parse_mode="Markdown",
+      )
+  else:
+    bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
+
+
+@bot.message_handler(commands=["setigmargin"])
+def set_ig_margin_command(message):
+  user_id = message.from_user.id
+  if user_id == ADMIN_ID:
+    try:
+      parts = message.text.split()
+      if len(parts) < 2:
+        bot.reply_to(
+            message,
+            "❌ Sahi format use karein: `/setigmargin 60`",
+            parse_mode="Markdown",
+        )
+        return
+      new_margin = float(parts[1])
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "UPDATE settings SET value = %s WHERE key = 'instagram_views_margin'",
+          (new_margin,),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
+      bot.reply_to(
+          message,
+          f"✅ Instagram Views profit margin successfully updated to"
+          f" **{new_margin}%**",
+          parse_mode="Markdown",
+      )
+    except ValueError:
+      bot.reply_to(
+          message,
+          "❌ Kripya valid number dalein, jaise: `/setigmargin 60`",
           parse_mode="Markdown",
       )
   else:
@@ -714,11 +788,14 @@ def callback_listener(call):
     buttons = []
 
     for idx, s in enumerate(current_services, start=start_idx + 1):
-      selling_price = calculate_selling_price(s.get("rate", 0))
-      full_name = s.get("name")
+      s_name = s.get("name", "")
+      s_cat = s.get("category", "")
+      selling_price = calculate_selling_price(
+          s.get("rate", 0), s_name, s_cat
+      )
       service_id = str(s.get("service"))
 
-      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {full_name}\n\n"
+      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
 
       buttons.append(
           types.InlineKeyboardButton(
@@ -771,7 +848,7 @@ def callback_listener(call):
 
     msg = bot.send_message(
         chat_id,
-        "🔗 **Ab apna Link bhejein** (jahan followers/likes chahiye):",
+        "🔗 **Ab apna Link bhejein** (jahan followers/likes/views chahiye):",
         parse_mode="Markdown",
     )
     bot.register_next_step_handler(msg, process_order_link)
@@ -831,7 +908,11 @@ def process_order_quantity(message):
       return
 
     wholesale_rate = float(selected_service.get("rate", 0))
-    unit_selling_price = calculate_selling_price(wholesale_rate)
+    s_name = selected_service.get("name", "")
+    s_cat = selected_service.get("category", "")
+    unit_selling_price = calculate_selling_price(
+        wholesale_rate, s_name, s_cat
+    )
     total_cost = round((unit_selling_price * quantity) / 1000.0, 2)
 
     user_row = get_user(user_id)
