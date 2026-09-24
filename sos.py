@@ -31,7 +31,7 @@ if not RENDER_URL.startswith("http"):
   RENDER_URL = f"https://{RENDER_URL}"
 
 # XMedia SMM API Details
-SMM_API_URL = "https://xmediasmm.com/api/v2"
+SMM_API_URL = "https://xmediasmm.in/api/v2"
 
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
@@ -757,6 +757,29 @@ def callback_listener(call):
             or "ig" in name
         ) and ("follower" in cat or "follower" in name):
           match = True
+      elif platform_name == "instagram":
+        if "instagram" in cat or "ig" in cat or "instagram" in name or "ig" in name:
+          match = True
+      elif platform_name == "telegram":
+        if "telegram" in cat or "tg" in cat or "telegram" in name or "tg" in name:
+          match = True
+      elif platform_name == "youtube":
+        if "youtube" in cat or "yt" in cat or "youtube" in name or "yt" in name:
+          match = True
+      elif platform_name == "facebook":
+        if "facebook" in cat or "fb" in cat or "facebook" in name or "fb" in name:
+          match = True
+      elif platform_name == "twitter":
+        if (
+            "twitter" in cat
+            or "x.com" in cat
+            or "twitter" in name
+            or "x" in name
+        ):
+          match = True
+      elif platform_name == "whatsapp":
+        if "whatsapp" in cat or "wa" in cat or "whatsapp" in name:
+          match = True
       else:
         if platform_name in cat or platform_name in name:
           match = True
@@ -766,7 +789,8 @@ def callback_listener(call):
 
     if not matched_services:
       bot.edit_message_text(
-          "❌ Is category mein koi service nahi mili.",
+          "❌ Is category mein koi service nahi mili. (API se data fetch nahi"
+          " ho pa raha ya category empty hai)",
           chat_id=chat_id,
           message_id=call.message.message_id,
           parse_mode="Markdown",
