@@ -6,7 +6,6 @@ import threading
 import time
 from flask import Flask, abort, request
 import psycopg2
-import razorpay
 import requests
 import telebot
 from telebot import types
@@ -15,11 +14,14 @@ from telebot import types
 # Securely load secrets from environment variables
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SMM_API_KEY = os.environ.get("SMM_API_KEY")
-RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET")
-RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET")
 
-# Fallback check (Optional warning if variables are missing)
+# Instant UPI Gateway Configuration (Environment variables se load karein)
+UPI_GATEWAY_API_URL = os.environ.get(
+    "UPI_GATEWAY_API_URL", "https://api.upigateway.com/v1/create_order"
+)
+UPI_GATEWAY_TOKEN = os.environ.get("UPI_GATEWAY_TOKEN", "YOUR_UPI_API_TOKEN")
+
+# Fallback check
 if not BOT_TOKEN:
   raise ValueError("BOT_TOKEN environment variable is not set!")
 
@@ -39,10 +41,6 @@ QR_CODE_URL = (
     "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
 )
 ADMIN_USERNAME = "@Socialpookiehelp"
-
-razorpay_client = razorpay.Client(
-    auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
-)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -84,6 +82,11 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id"
         " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
         " cost REAL, date_time TEXT)"
+    )
+    # Transactions table for instant UPI payment tracking
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS transactions (tx_id TEXT PRIMARY KEY,"
+        " user_id BIGINT, amount REAL, status TEXT, date_time TEXT)"
     )
     cursor.execute(
         "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
@@ -634,25 +637,79 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    payment_link = razorpay_client.payment_link.create({
-        "amount": int(amount_rs * 100),
-        "currency": "INR",
-        "description": f"Add ₹{amount_rs} to SMM Wallet",
-        "customer": {
-            "name": str(message.from_user.first_name),
-            "contact": "9876543210",
-            "email": "user@example.com",
-        },
-        "notes": {"user_id": str(user_id)},
-    })
+    tx_id = f"TXN_{user_id}_{int(time.time())}"
 
-    clear_user_state(user_id)
-    bot.reply_to(
-        message,
-        f"💳 **Payment Link Generated:**\n\n🔗 {payment_link.get('short_url')}\n\n*Payment"
-        " karne ke baad aapka balance automatic update ho jayega!*",
-        parse_mode="Markdown",
+    # Database mein pending transaction save karein
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO transactions (tx_id, user_id, amount, status, date_time)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (
+            tx_id,
+            user_id,
+            amount_rs,
+            "PENDING",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
     )
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    payload = {
+        "key": UPI_GATEWAY_TOKEN,
+        "client_txn_id": tx_id,
+        "amount": amount_rs,
+        "p_info": "Add to SMM Wallet",
+        "customer_name": str(message.from_user.first_name),
+        "customer_email": "user@gmail.com",
+        "customer_mobile": "9876543210",
+        "redirect_url": f"{RENDER_URL}/upi-callback",
+    }
+
+    response = requests.post(
+        UPI_GATEWAY_API_URL, data=payload, timeout=10
+    ).json()
+
+    if response.get("status") == True or response.get("status") == "success":
+      payment_url = response["data"]["payment_url"]
+      qr_image = response["data"].get("qr_code", QR_CODE_URL)
+
+      markup = types.InlineKeyboardMarkup()
+      markup.add(
+          types.InlineKeyboardButton(
+              "🔗 Pay Now (Open UPI App)", url=payment_url
+          )
+      )
+
+      clear_user_state(user_id)
+      bot.send_photo(
+          message.chat.id,
+          photo=qr_image,
+          caption=(
+              f"💳 **Instant UPI Payment Generated**\n\n💰 Amount:"
+              f" `₹{amount_rs}`\n🆔 Tx ID: `{tx_id}`\n\nNiche diye gaye button par"
+              " click karke ya QR scan karke pay karein. Payment hote hi"
+              " balance **automatic** add ho jayega!"
+          ),
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    else:
+      # Agar API fail ho toh default static QR dikhayein
+      clear_user_state(user_id)
+      bot.send_photo(
+          message.chat.id,
+          photo=QR_CODE_URL,
+          caption=(
+              f"💳 **Add Funds via UPI**\n\nUPI ID: `{UPI_ID}`\nAmount:"
+              f" `₹{amount_rs}`\n\nPayment karne ke baad Admin ko screenshot"
+              f" bhejein: {ADMIN_USERNAME}"
+          ),
+          parse_mode="Markdown",
+      )
+
   except Exception as e:
     clear_user_state(user_id)
     bot.reply_to(message, f"Error: {str(e)}")
@@ -699,28 +756,9 @@ def handle_menu_buttons(message):
       ])
       bot.reply_to(message, msg, parse_mode="Markdown")
   elif text == "💳 Add Funds (QR & UPI)":
-    text_msg = (
-        f"💳 **Add Funds**\n\nUPI ID: `{UPI_ID}`\n\nAap niche diye gaye button par"
-        " click karke bhi Razorpay se payment kar sakte hain:"
+    ask_amount_logic(
+        message.chat.id, message.from_user.id, message.from_user.first_name
     )
-    markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton(
-            "💳 Pay via Razorpay", callback_data="pay_razorpay"
-        )
-    )
-    try:
-      bot.send_photo(
-          message.chat.id,
-          photo=QR_CODE_URL,
-          caption=text_msg,
-          parse_mode="Markdown",
-          reply_markup=markup,
-      )
-    except:
-      bot.send_message(
-          message.chat.id, text_msg, parse_mode="Markdown", reply_markup=markup
-      )
   elif text == "📞 Support":
     bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
 
@@ -730,11 +768,7 @@ def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
 
-  if call.data == "pay_razorpay":
-    bot.answer_callback_query(call.id)
-    ask_amount_logic(chat_id, user_id, call.from_user.first_name)
-
-  elif call.data.startswith("plat_"):
+  if call.data.startswith("plat_"):
     bot.answer_callback_query(call.id, "Loading services...")
 
     parts = call.data.split("_")
@@ -749,7 +783,6 @@ def callback_listener(call):
       name = s.get("name", "").lower()
       match = False
 
-      # Strict and Separated Filtering Logic to avoid mixing
       if platform_name == "ig_followers":
         if (
             "instagram" in cat or "ig" in cat or "instagram" in name
@@ -948,7 +981,7 @@ def process_order_quantity(message):
           message,
           f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour"
           f" Balance: ₹{current_balance:.2f}\n\nPehle Funds Add karein.",
-          parse_mode="Markdown",
+          parse_Mode="Markdown",
       )
       clear_user_state(user_id)
       return
@@ -1028,43 +1061,52 @@ def telegram_webhook():
     return "Forbidden", 403
 
 
-@app.route("/razorpay-webhook", methods=["POST"])
-def razorpay_webhook():
-  event_data = request.get_json()
-  if not event_data:
-    abort(400)
+@app.route("/upi-webhook", methods=["POST"])
+def upi_webhook():
+  data = request.json
+  if not data:
+    return abort(400)
 
-  event = event_data.get("event")
+  client_txn_id = data.get("client_txn_id")
+  status = data.get("status")
+  amount = float(data.get("amount", 0))
 
-  if event == "payment_link.paid":
-    payment_link_entity = (
-        event_data.get("payload", {})
-        .get("payment_link", {})
-        .get("entity", {})
+  if status == "SUCCESS" or status == "success":
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT user_id, status FROM transactions WHERE tx_id = %s",
+        (client_txn_id,),
     )
-    notes = payment_link_entity.get("notes", {})
-    user_id_str = notes.get("user_id")
+    row = cursor.fetchone()
 
-    if user_id_str:
+    if row and row[1] == "PENDING":
+      user_id = row[0]
+      cursor.execute(
+          "UPDATE transactions SET status = 'SUCCESS' WHERE tx_id = %s",
+          (client_txn_id,),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
+
+      register_user(user_id)
+      update_balance(user_id, amount)
+
       try:
-        user_id = int(user_id_str)
-        amount_paid = float(payment_link_entity.get("amount_paid", 0)) / 100.0
-
-        register_user(user_id)
-        update_balance(user_id, amount_paid)
-
-        try:
-          bot.send_message(
-              user_id,
-              f"🎉 **Payment Successful!**\n\n`₹{amount_paid}` successfully"
-              " aapke wallet mein add kar diye gaye hain!",
-              parse_mode="Markdown",
-          )
-        except Exception as e:
-          print("Failed to send Telegram notification:", e)
-
+        bot.send_message(
+            user_id,
+            f"🎉 **Payment Successful!**\n\n`₹{amount}` successfully aapke wallet"
+            " mein add kar diye gaye hain!",
+            parse_mode="Markdown",
+        )
       except Exception as e:
-        print("Webhook database update error:", e)
+        print("Notification error:", e)
+
+    else:
+      cursor.close()
+      conn.close()
 
   return "OK", 200
 
