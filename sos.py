@@ -15,12 +15,6 @@ from telebot import types
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SMM_API_KEY = os.environ.get("SMM_API_KEY")
 
-# Instant UPI Gateway Configuration (Environment variables se load karein)
-UPI_GATEWAY_API_URL = os.environ.get(
-    "UPI_GATEWAY_API_URL", "https://api.upigateway.com/v1/create_order"
-)
-UPI_GATEWAY_TOKEN = os.environ.get("UPI_GATEWAY_TOKEN", "YOUR_UPI_API_TOKEN")
-
 # Fallback check
 if not BOT_TOKEN:
   raise ValueError("BOT_TOKEN environment variable is not set!")
@@ -82,11 +76,6 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id"
         " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
         " cost REAL, date_time TEXT)"
-    )
-    # Transactions table for instant UPI payment tracking
-    cursor.execute(
-        "CREATE TABLE IF NOT EXISTS transactions (tx_id TEXT PRIMARY KEY,"
-        " user_id BIGINT, amount REAL, status TEXT, date_time TEXT)"
     )
     cursor.execute(
         "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
@@ -594,7 +583,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account سے `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -637,78 +626,17 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    tx_id = f"TXN_{user_id}_{int(time.time())}"
-
-    # Database mein pending transaction save karein
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO transactions (tx_id, user_id, amount, status, date_time)"
-        " VALUES (%s, %s, %s, %s, %s)",
-        (
-            tx_id,
-            user_id,
-            amount_rs,
-            "PENDING",
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    clear_user_state(user_id)
+    bot.send_photo(
+        message.chat.id,
+        photo=QR_CODE_URL,
+        caption=(
+            f"💳 **Add Funds via UPI**\n\nUPI ID: `{UPI_ID}`\nAmount:"
+            f" `₹{amount_rs}`\n\nPayment karne ke baad screenshot aur Tx ID Admin"
+            f" ko bhejein: {ADMIN_USERNAME}"
         ),
+        parse_mode="Markdown",
     )
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    payload = {
-        "key": UPI_GATEWAY_TOKEN,
-        "client_txn_id": tx_id,
-        "amount": amount_rs,
-        "p_info": "Add to SMM Wallet",
-        "customer_name": str(message.from_user.first_name),
-        "customer_email": "user@gmail.com",
-        "customer_mobile": "9876543210",
-        "redirect_url": f"{RENDER_URL}/upi-callback",
-    }
-
-    response = requests.post(
-        UPI_GATEWAY_API_URL, data=payload, timeout=10
-    ).json()
-
-    if response.get("status") == True or response.get("status") == "success":
-      payment_url = response["data"]["payment_url"]
-      qr_image = response["data"].get("qr_code", QR_CODE_URL)
-
-      markup = types.InlineKeyboardMarkup()
-      markup.add(
-          types.InlineKeyboardButton(
-              "🔗 Pay Now (Open UPI App)", url=payment_url
-          )
-      )
-
-      clear_user_state(user_id)
-      bot.send_photo(
-          message.chat.id,
-          photo=qr_image,
-          caption=(
-              f"💳 **Instant UPI Payment Generated**\n\n💰 Amount:"
-              f" `₹{amount_rs}`\n🆔 Tx ID: `{tx_id}`\n\nNiche diye gaye button par"
-              " click karke ya QR scan karke pay karein. Payment hote hi"
-              " balance **automatic** add ho jayega!"
-          ),
-          parse_mode="Markdown",
-          reply_markup=markup,
-      )
-    else:
-      # Agar API fail ho toh default static QR dikhayein
-      clear_user_state(user_id)
-      bot.send_photo(
-          message.chat.id,
-          photo=QR_CODE_URL,
-          caption=(
-              f"💳 **Add Funds via UPI**\n\nUPI ID: `{UPI_ID}`\nAmount:"
-              f" `₹{amount_rs}`\n\nPayment karne ke baad Admin ko screenshot"
-              f" bhejein: {ADMIN_USERNAME}"
-          ),
-          parse_mode="Markdown",
-      )
 
   except Exception as e:
     clear_user_state(user_id)
@@ -981,7 +909,7 @@ def process_order_quantity(message):
           message,
           f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour"
           f" Balance: ₹{current_balance:.2f}\n\nPehle Funds Add karein.",
-          parse_Mode="Markdown",
+          parse_mode="Markdown",
       )
       clear_user_state(user_id)
       return
@@ -1059,56 +987,6 @@ def telegram_webhook():
     return "OK", 200
   else:
     return "Forbidden", 403
-
-
-@app.route("/upi-webhook", methods=["POST"])
-def upi_webhook():
-  data = request.json
-  if not data:
-    return abort(400)
-
-  client_txn_id = data.get("client_txn_id")
-  status = data.get("status")
-  amount = float(data.get("amount", 0))
-
-  if status == "SUCCESS" or status == "success":
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT user_id, status FROM transactions WHERE tx_id = %s",
-        (client_txn_id,),
-    )
-    row = cursor.fetchone()
-
-    if row and row[1] == "PENDING":
-      user_id = row[0]
-      cursor.execute(
-          "UPDATE transactions SET status = 'SUCCESS' WHERE tx_id = %s",
-          (client_txn_id,),
-      )
-      conn.commit()
-      cursor.close()
-      conn.close()
-
-      register_user(user_id)
-      update_balance(user_id, amount)
-
-      try:
-        bot.send_message(
-            user_id,
-            f"🎉 **Payment Successful!**\n\n`₹{amount}` successfully aapke wallet"
-            " mein add kar diye gaye hain!",
-            parse_mode="Markdown",
-        )
-      except Exception as e:
-        print("Notification error:", e)
-
-    else:
-      cursor.close()
-      conn.close()
-
-  return "OK", 200
 
 
 def keep_alive():
