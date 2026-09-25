@@ -11,11 +11,9 @@ import telebot
 from telebot import types
 
 # ==================== CONFIGURATION ====================
-# Securely load secrets from environment variables
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SMM_API_KEY = os.environ.get("SMM_API_KEY")
 
-# Fallback check
 if not BOT_TOKEN:
   raise ValueError("BOT_TOKEN environment variable is not set!")
 
@@ -26,7 +24,6 @@ RENDER_URL = RENDER_URL.strip().rstrip("/")
 if not RENDER_URL.startswith("http"):
   RENDER_URL = f"https://{RENDER_URL}"
 
-# XMedia SMM API Details
 SMM_API_URL = "https://xmediasmm.in/api/v2"
 
 ADMIN_ID = 6658716591
@@ -583,7 +580,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account سے `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -626,21 +623,110 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    clear_user_state(user_id)
+    # Amount save kar lo state me taaki agle step me kaam aaye
+    user_order_state[user_id] = {
+        "expecting_utr": True,
+        "fund_amount": amount_rs,
+    }
+
     bot.send_photo(
         message.chat.id,
         photo=QR_CODE_URL,
         caption=(
-            f"💳 **Add Funds via UPI**\n\nUPI ID: `{UPI_ID}`\nAmount:"
-            f" `₹{amount_rs}`\n\nPayment karne ke baad screenshot aur Tx ID Admin"
-            f" ko bhejein: {ADMIN_USERNAME}"
+            f"💳 **BharatPe QR & UPI Payment**\n\nUPI ID: `{UPI_ID}`\nAmount:"
+            f" `₹{amount_rs}`\n\nPayment karne ke baad apna **UTR / Tx ID** ya"
+            " **Screenshot** yahan chat mein bhej dein!"
         ),
         parse_mode="Markdown",
     )
+    # Agla step user ke UTR / Proof ke liye
+    bot.register_next_step_handler(message, process_payment_proof)
 
   except Exception as e:
     clear_user_state(user_id)
     bot.reply_to(message, f"Error: {str(e)}")
+
+
+def process_payment_proof(message):
+  user_id = message.from_user.id
+
+  if message.text and message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
+    return
+
+  state = user_order_state.get(user_id, {})
+  amount_rs = state.get("fund_amount", 0)
+
+  if not amount_rs:
+    clear_user_state(user_id)
+    bot.reply_to(
+        message,
+        "❌ Session expired ya amount missing. Dobara 'Add Funds' par click"
+        " karein.",
+    )
+    return
+
+  # Admin ke paas approval ke liye bhejo buttons ke sath
+  markup = types.InlineKeyboardMarkup(row_width=2)
+  markup.add(
+      types.InlineKeyboardButton(
+          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs}"
+      ),
+      types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
+  )
+
+  user_name = message.from_user.first_name or "User"
+  user_username = (
+      f"@{message.from_user.username}"
+      if message.from_user.username
+      else "No Username"
+  )
+
+  caption_text = (
+      f"🔔 **New Fund Request!**\n\n"
+      f"👤 User: {user_name} (`{user_id}`)\n"
+      f"🔗 Username: {user_username}\n"
+      f"💰 Amount: `₹{amount_rs}`\n\n"
+      f"Neeche diye gaye button par click karke balance approve karein:"
+  )
+
+  try:
+    # Agar user ne photo bheji hai toh photo forward/send karo
+    if message.photo:
+      file_id = message.photo[-1].file_id
+      bot.send_photo(
+          ADMIN_ID,
+          photo=file_id,
+          caption=caption_text,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    else:
+      # Agar text (UTR) bheja hai
+      proof_text = message.text or "No text"
+      full_text = (
+          f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
+      )
+      bot.send_message(
+          ADMIN_ID, full_text, parse_mode="Markdown", reply_markup=markup
+      )
+
+    bot.reply_to(
+        message,
+        "✅ **Payment Proof Submitted!**\nAdmin ne aapka request check kar liya"
+        " hai, jald hi aapke wallet mein balance add ho jayega.",
+        parse_mode="Markdown",
+    )
+  except Exception as e:
+    print("Admin notification error:", e)
+    bot.reply_to(
+        message,
+        "❌ Proof bhejne mein kuch error aayi. Kripya Support se contact"
+        " karein.",
+    )
+
+  clear_user_state(user_id)
 
 
 @bot.message_handler(func=lambda message: message.text in MENU_BUTTONS)
@@ -695,6 +781,92 @@ def handle_menu_buttons(message):
 def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
+
+  # Admin Approval Button Handler
+  if call.data.startswith("app_") or call.data.startswith("rej_"):
+    if user_id != ADMIN_ID:
+      bot.answer_callback_query(call.id, "❌ Aap admin nahi hain!", show_alert=True)
+      return
+
+    parts = call.data.split("_")
+    action = parts[0]
+    target_user_id = int(parts[1])
+
+    if action == "app":
+      amount = float(parts[2])
+      register_user(target_user_id)
+      update_balance(target_user_id, amount)
+
+      # Admin message update kar do taaki pata chale approve ho gaya
+      try:
+        bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            caption=(
+                f"{call.message.caption}\n\n"
+                f"✅ **STATUS: APPROVED** (₹{amount} Added)"
+            ),
+            parse_mode="Markdown",
+            reply_markup=None,
+        )
+      except:
+        try:
+          bot.edit_message_text(
+              chat_id=chat_id,
+              message_id=call.message.message_id,
+              text=f"{call.message.text}\n\n✅ **STATUS: APPROVED** (₹{amount} Added)",
+              parse_mode="Markdown",
+              reply_markup=None,
+          )
+        except:
+          pass
+
+      bot.answer_callback_query(call.id, f"Successfully added ₹{amount}!")
+
+      # User ko notification bhejo
+      try:
+        bot.send_message(
+            target_user_id,
+            f"🎉 **Payment Approved!**\nAdmin ne aapka payment verify kar liya"
+            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye hain!",
+            parse_mode="Markdown",
+        )
+      except:
+        pass
+
+    elif action == "rej":
+      try:
+        bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            caption=f"{call.message.caption}\n\n❌ **STATUS: REJECTED**",
+            parse_mode="Markdown",
+            reply_markup=None,
+        )
+      except:
+        try:
+          bot.edit_message_text(
+              chat_id=chat_id,
+              message_id=call.message.message_id,
+              text=f"{call.message.text}\n\n❌ **STATUS: REJECTED**",
+              parse_mode="Markdown",
+              reply_markup=None,
+          )
+        except:
+          pass
+
+      bot.answer_callback_query(call.id, "Payment rejected!")
+
+      try:
+        bot.send_message(
+            target_user_id,
+            "❌ **Payment Rejected:** Aapka payment proof invalid ya match nahi"
+            " hua. Kripya support se contact karein.",
+            parse_mode="Markdown",
+        )
+      except:
+        pass
+    return
 
   if call.data.startswith("plat_"):
     bot.answer_callback_query(call.id, "Loading services...")
