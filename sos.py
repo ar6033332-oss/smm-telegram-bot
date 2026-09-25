@@ -629,13 +629,21 @@ def process_payment_amount(message):
         "fund_amount": amount_rs,
     }
 
+    # 🔥 High-Trust & Professional Branding Message Added Here
     bot.send_photo(
         message.chat.id,
         photo=QR_CODE_URL,
         caption=(
-            f"💳 **BharatPe QR & UPI Payment**\n\nUPI ID: `{UPI_ID}`\nAmount:"
-            f" `₹{amount_rs}`\n\nPayment karne ke baad apna **UTR / Tx ID** ya"
-            " **Screenshot** yahan chat mein bhej dein!"
+            "🛡 **SECURE ENCRYPTED UPI GATEWAY** 🛡\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚡ **Status:** Active & Instant Credit\n"
+            f"🆔 **UPI ID:** `{UPI_ID}`\n"
+            f"💰 **Payable Amount:** `₹{amount_rs}`\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🚨 **IMPORTANT INSTRUCTIONS:**\n"
+            f"1️⃣ Upar diye gaye QR ya UPI ID par **₹{amount_rs}** transfer karein.\n"
+            "2️⃣ Payment successful hone ke baad **UTR (Transaction ID)** ya **Screenshot** turant yahin bhej dein.\n\n"
+            "⏳ *Wallet mein balance 10 seconds ke andar automatic update kar diya jayega!*"
         ),
         parse_mode="Markdown",
     )
