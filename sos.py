@@ -49,6 +49,7 @@ MENU_BUTTONS = [
     "📞 Support",
 ]
 
+
 # ==================== DATABASE SETUP ====================
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -174,9 +175,7 @@ def get_user(user_id):
 def register_user(user_id, referred_by=None):
   conn = get_db_connection()
   cursor = conn.cursor()
-  cursor.execute(
-      "SELECT user_id FROM users WHERE user_id = %s", (user_id,)
-  )
+  cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
   exists = cursor.fetchone()
   if not exists:
     cursor.execute(
@@ -330,83 +329,6 @@ def addfunds_command(message):
   )
 
 
-@bot.message_handler(commands=["setmargin"])
-def set_margin_command(message):
-  user_id = message.from_user.id
-  if user_id == ADMIN_ID:
-    try:
-      parts = message.text.split()
-      if len(parts) < 2:
-        bot.reply_to(
-            message,
-            "❌ Sahi format use karein: `/setmargin 35`",
-            parse_mode="Markdown",
-        )
-        return
-      new_margin = float(parts[1])
-      conn = get_db_connection()
-      cursor = conn.cursor()
-      cursor.execute(
-          "UPDATE settings SET value = %s WHERE key = 'profit_margin'",
-          (new_margin,),
-      )
-      conn.commit()
-      cursor.close()
-      conn.close()
-      bot.reply_to(
-          message,
-          f"✅ General profit margin successfully updated to **{new_margin}%**",
-          parse_mode="Markdown",
-      )
-    except ValueError:
-      bot.reply_to(
-          message,
-          "❌ Kripya valid number dalein, jaise: `/setmargin 30`",
-          parse_mode="Markdown",
-      )
-  else:
-    bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
-
-
-@bot.message_handler(commands=["setigmargin"])
-def set_ig_margin_command(message):
-  user_id = message.from_user.id
-  if user_id == ADMIN_ID:
-    try:
-      parts = message.text.split()
-      if len(parts) < 2:
-        bot.reply_to(
-            message,
-            "❌ Sahi format use karein: `/setigmargin 60`",
-            parse_mode="Markdown",
-        )
-        return
-      new_margin = float(parts[1])
-      conn = get_db_connection()
-      cursor = conn.cursor()
-      cursor.execute(
-          "UPDATE settings SET value = %s WHERE key = 'instagram_views_margin'",
-          (new_margin,),
-      )
-      conn.commit()
-      cursor.close()
-      conn.close()
-      bot.reply_to(
-          message,
-          f"✅ Instagram Views profit margin successfully updated to"
-          f" **{new_margin}%**",
-          parse_mode="Markdown",
-      )
-    except ValueError:
-      bot.reply_to(
-          message,
-          "❌ Kripya valid number dalein, jaise: `/setigmargin 60`",
-          parse_mode="Markdown",
-      )
-  else:
-    bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
-
-
 @bot.message_handler(commands=["status"])
 def status_command(message):
   parts = message.text.split()
@@ -499,149 +421,13 @@ def check_and_send_status(chat_id, user_id, order_id, is_reply=False):
       bot.send_message(chat_id, text)
 
 
-@bot.message_handler(commands=["broadcast"])
-def broadcast_command(message):
-  user_id = message.from_user.id
-  if user_id != ADMIN_ID:
-    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
-    return
-
-  text_parts = message.text.split(maxsplit=1)
-  if len(text_parts) < 2:
-    bot.reply_to(
-        message,
-        "❌ Sahi format use karein:\n`/broadcast Aapka message yahan likhein`",
-        parse_mode="Markdown",
-    )
-    return
-
-  broadcast_text = text_parts[1]
-
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  cursor.execute("SELECT user_id FROM users")
-  all_users = cursor.fetchall()
-  cursor.close()
-  conn.close()
-
-  success_count = 0
-  fail_count = 0
-
-  bot.reply_to(
-      message,
-      f"📢 Broadcast shuru ho gaya hai... Total users: {len(all_users)}",
-  )
-
-  for row in all_users:
-    uid = row[0]
-    try:
-      bot.send_message(
-          uid,
-          f"📢 **Announcement:**\n\n{broadcast_text}",
-          parse_mode="Markdown",
-      )
-      success_count += 1
-      time.sleep(0.1)
-    except Exception:
-      fail_count += 1
-
-  bot.send_message(
-      message.chat.id,
-      f"✅ **Broadcast Completed!**\n\nSuccessful: `{success_count}`\nFailed"
-      f" (Blocked/Inactive): `{fail_count}`",
-      parse_mode="Markdown",
-  )
-
-
-@bot.message_handler(commands=["addbal"])
-def add_balance_admin(message):
-  if message.from_user.id != ADMIN_ID:
-    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
-    return
-  parts = message.text.split()
-  if len(parts) < 3:
-    bot.reply_to(
-        message,
-        "❌ Sahi format: `/addbal <User_ID> <Amount>`\nJaise: `/addbal"
-        " 123456789 50`",
-        parse_mode="Markdown",
-    )
-    return
-  try:
-    target_user_id = int(parts[1])
-    amount = float(parts[2])
-    register_user(target_user_id)
-    update_balance(target_user_id, amount)
-    bot.reply_to(
-        message,
-        f"✅ Success! User `{target_user_id}` ke account mein `₹{amount}` add"
-        " kar diye gaye hain.",
-        parse_mode="Markdown",
-    )
-    try:
-      bot.send_message(
-          target_user_id,
-          f"💰 **Balance Updated:** Admin ne aapke wallet mein `₹{amount}` add"
-          " kar diye hain!",
-          parse_mode="Markdown",
-      )
-    except:
-      pass
-  except ValueError:
-    bot.reply_to(
-        message,
-        "❌ Kripya valid User ID aur Amount dalein.",
-        parse_mode="Markdown",
-    )
-
-
-@bot.message_handler(commands=["cutbal"])
-def cut_balance_admin(message):
-  if message.from_user.id != ADMIN_ID:
-    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
-    return
-  parts = message.text.split()
-  if len(parts) < 3:
-    bot.reply_to(
-        message,
-        "❌ Sahi format: `/cutbal <User_ID> <Amount>`\nJaise: `/cutbal"
-        " 123456789 50`",
-        parse_mode="Markdown",
-    )
-    return
-  try:
-    target_user_id = int(parts[1])
-    amount = float(parts[2])
-    update_balance(target_user_id, -amount)
-    bot.reply_to(
-        message,
-        f"✅ Success! User `{target_user_id}` ke account سے `₹{amount}` kaat"
-        " liye gaye hain.",
-        parse_mode="Markdown",
-    )
-    try:
-      bot.send_message(
-          target_user_id,
-          f"⚠️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
-          " liye hain.",
-          parse_mode="Markdown",
-      )
-    except:
-      pass
-  except ValueError:
-    bot.reply_to(
-        message,
-        "❌ Kripya valid User ID aur Amount dalein.",
-        parse_mode="Markdown",
-    )
-
-
 def ask_amount_logic(chat_id, user_id, first_name):
   user_order_state[user_id] = {"expecting_amount": True}
   msg = bot.send_message(
       chat_id,
       "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)",
       parse_mode="Markdown",
+      reply_markup=main_menu(),
   )
   bot.register_next_step_handler(msg, process_payment_amount)
 
@@ -679,6 +465,7 @@ def process_payment_amount(message):
             "⏳ *Wallet mein balance 10 seconds ke andar automatic update kar diya jayega!*"
         ),
         parse_mode="Markdown",
+        reply_markup=main_menu(),
     )
     bot.register_next_step_handler(message, process_payment_proof)
 
@@ -752,6 +539,7 @@ def process_payment_proof(message):
         "✅ **Payment Proof Submitted!**\nAdmin ne aapka request check kar liya"
         " hai, jald hi aapke wallet mein balance add ho jayega.",
         parse_mode="Markdown",
+        reply_markup=main_menu(),
     )
   except Exception as e:
     print("Admin notification error:", e)
@@ -861,7 +649,6 @@ def handle_menu_buttons(message):
     bot_username = bot_info.username
     ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
 
-    # Count how many users were referred by this user
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -908,14 +695,12 @@ def callback_listener(call):
       amount = float(parts[2])
       register_user(target_user_id)
 
-      # Check if this user was referred by someone and hasn't triggered bonus yet
       user_data = get_user(target_user_id)
       referred_by = user_data[1] if user_data else None
       bonus_given = user_data[2] if user_data else True
 
       update_balance(target_user_id, amount)
 
-      # Handle Referral Bonus (e.g., ₹5 bonus to referrer on first fund add)
       if referred_by and not bonus_given:
         BONUS_AMOUNT = 5.0
         update_balance(referred_by, BONUS_AMOUNT)
@@ -952,16 +737,7 @@ def callback_listener(call):
             reply_markup=None,
         )
       except:
-        try:
-          bot.edit_message_text(
-              chat_id=chat_id,
-              message_id=call.message.message_id,
-              text=f"{call.message.text}\n\n✅ **STATUS: APPROVED** (₹{amount} Added)",
-              parse_mode="Markdown",
-              reply_markup=None,
-          )
-        except:
-          pass
+        pass
 
       bot.answer_callback_query(call.id, f"Successfully added ₹{amount}!")
 
@@ -985,16 +761,7 @@ def callback_listener(call):
             reply_markup=None,
         )
       except:
-        try:
-          bot.edit_message_text(
-              chat_id=chat_id,
-              message_id=call.message.message_id,
-              text=f"{call.message.text}\n\n❌ **STATUS: REJECTED**",
-              parse_mode="Markdown",
-              reply_markup=None,
-          )
-        except:
-          pass
+        pass
 
       bot.answer_callback_query(call.id, "Payment rejected!")
 
@@ -1149,6 +916,7 @@ def callback_listener(call):
         chat_id,
         "🔗 **Ab apna Link bhejein** (jahan followers/likes/views chahiye):",
         parse_mode="Markdown",
+        reply_markup=main_menu(),
     )
     bot.register_next_step_handler(msg, process_order_link)
 
@@ -1160,7 +928,10 @@ def process_order_link(message):
     handle_menu_buttons(message)
     return
 
-  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
+  if (
+      user_id not in user_order_state
+      or "service_id" not in user_order_state[user_id]
+  ):
     bot.reply_to(message, "❌ Session expired. Dobara start karein.")
     return
 
@@ -1169,6 +940,7 @@ def process_order_link(message):
       message.chat.id,
       "📊 **Quantity kitni chahiye?** (Number me likhein, jaise: 1000)",
       parse_mode="Markdown",
+      reply_markup=main_menu(),
   )
   bot.register_next_step_handler(msg, process_order_quantity)
 
@@ -1180,7 +952,10 @@ def process_order_quantity(message):
     handle_menu_buttons(message)
     return
 
-  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
+  if (
+      user_id not in user_order_state
+      or "service_id" not in user_order_state[user_id]
+  ):
     bot.reply_to(message, "❌ Session expired. Dobara start karein.")
     return
 
@@ -1223,6 +998,7 @@ def process_order_quantity(message):
           f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour"
           f" Balance: ₹{current_balance:.2f}\n\nPehle Funds Add karein.",
           parse_mode="Markdown",
+          reply_markup=main_menu(),
       )
       clear_user_state(user_id)
       return
@@ -1260,7 +1036,6 @@ def process_order_quantity(message):
       cursor.close()
       conn.close()
 
-      # Inline button for instant status check
       markup = types.InlineKeyboardMarkup()
       markup.add(
           types.InlineKeyboardButton(
@@ -1276,7 +1051,7 @@ def process_order_quantity(message):
           f" `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance:"
           f" `₹{current_balance - total_cost:.2f}`",
           parse_mode="Markdown",
-          reply_markup=markup,
+          reply_markup=main_menu(),
       )
     else:
       error_msg = smm_data.get("error", "Unknown SMM Error")
@@ -1284,13 +1059,16 @@ def process_order_quantity(message):
           message,
           f"❌ **SMM Panel Error:**\n`{error_msg}`",
           parse_mode="Markdown",
+          reply_markup=main_menu(),
       )
 
     clear_user_state(user_id)
 
   except ValueError:
     bot.reply_to(
-        message, "❌ Kripya valid number dalein (jaise: 500 ya 1000)."
+        message,
+        "❌ Kripya valid number dalein (jaise: 500 ya 1000).",
+        reply_markup=main_menu(),
     )
 
 
