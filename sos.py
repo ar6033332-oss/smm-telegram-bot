@@ -316,7 +316,7 @@ def start_handler(message):
           try:
             bot.send_message(
                 referrer_id,
-                "🎉 **New Referral!** Aapki link se ek naye user ne join kiya"
+                "🎉 *New Referral!* Aapki link se ek naye user ne join kiya"
                 " hai.",
                 parse_mode="Markdown",
             )
