@@ -400,7 +400,10 @@ def status_command(message):
 
   order_id = parts[1].strip()
   user_id = message.from_user.id
+  check_and_send_status(message.chat.id, user_id, order_id, is_reply=True)
 
+
+def check_and_send_status(chat_id, user_id, order_id, is_reply=False):
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -412,19 +415,21 @@ def status_command(message):
   conn.close()
 
   if not order_row:
-    bot.reply_to(
-        message,
-        "❌ Yeh Order ID database mein nahi mili. Sahi Order ID enter karein.",
-        parse_mode="Markdown",
-    )
+    text = "❌ Yeh Order ID database mein nahi mili. Sahi Order ID enter karein."
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
+    else:
+      bot.send_message(chat_id, text, parse_mode="Markdown")
     return
 
   db_user_id, order_cost, service_name = order_row
 
   if user_id != ADMIN_ID and user_id != db_user_id:
-    bot.reply_to(
-        message, "❌ Aap sirf apne orders ka status check kar sakte hain."
-    )
+    text = "❌ Aap sirf apne orders ka status check kar sakte hain."
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text)
+    else:
+      bot.send_message(chat_id, text)
     return
 
   try:
@@ -433,11 +438,11 @@ def status_command(message):
     res_data = response.json()
 
     if "error" in res_data:
-      bot.reply_to(
-          message,
-          f"❌ **SMM Error:** `{res_data['error']}`",
-          parse_mode="Markdown",
-      )
+      text = f"❌ **SMM Error:** `{res_data['error']}`"
+      if is_reply:
+        bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
+      else:
+        bot.send_message(chat_id, text, parse_mode="Markdown")
       return
 
     status = res_data.get("status", "Unknown")
@@ -460,10 +465,17 @@ def status_command(message):
           " jama kar diye gaye hain kyunki order cancel ho gaya tha."
       )
 
-    bot.reply_to(message, status_msg, parse_mode="Markdown")
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), status_msg, parse_mode="Markdown")
+    else:
+      bot.send_message(chat_id, status_msg, parse_mode="Markdown")
 
   except Exception as e:
-    bot.reply_to(message, f"❌ Status fetch karne mein error aayi: {str(e)}")
+    text = f"❌ Status fetch karne mein error aayi: {str(e)}"
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text)
+    else:
+      bot.send_message(chat_id, text)
 
 
 @bot.message_handler(commands=["broadcast"])
@@ -582,7 +594,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account سے `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -709,9 +721,7 @@ def process_payment_proof(message):
       )
     else:
       proof_text = message.text or "No text"
-      full_text = (
-          f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
-      )
+      full_text = f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
       bot.send_message(
           ADMIN_ID, full_text, parse_mode="Markdown", reply_markup=markup
       )
@@ -750,7 +760,6 @@ def handle_menu_buttons(message):
   elif text == "🔥 Trending Services":
     services = get_cached_smm_services()
     trending_matches = []
-    # Hum kuch popular keywords search karenge jo sabse zyada bikte hain
     for s in services:
       name = s.get("name", "").lower()
       cat = s.get("category", "").lower()
@@ -761,7 +770,7 @@ def handle_menu_buttons(message):
           or "like" in name
       ):
         trending_matches.append(s)
-        if len(trending_matches) >= 10:  # Top 10 trending dikhayenge
+        if len(trending_matches) >= 10:
           break
 
     if not trending_matches:
@@ -770,9 +779,7 @@ def handle_menu_buttons(message):
       )
       return
 
-    list_text = (
-        "🔥 *TOP TRENDING & BEST SERVICES* 🔥\n\n```text\n"
-    )
+    list_text = "🔥 *TOP TRENDING & BEST SERVICES* 🔥\n\n```text\n"
     markup = types.InlineKeyboardMarkup()
 
     for idx, s in enumerate(trending_matches, start=1):
@@ -837,6 +844,13 @@ def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
 
+  # 🔍 LIVE STATUS CHECK HANDLER
+  if call.data.startswith("chkstatus_"):
+    order_id = call.data.replace("chkstatus_", "")
+    bot.answer_callback_query(call.id, "Fetching live status...")
+    check_and_send_status(chat_id, user_id, order_id, is_reply=False)
+    return
+
   if call.data.startswith("app_") or call.data.startswith("rej_"):
     if user_id != ADMIN_ID:
       bot.answer_callback_query(call.id, "❌ Aap admin nahi hain!", show_alert=True)
@@ -880,7 +894,7 @@ def callback_listener(call):
         bot.send_message(
             target_user_id,
             f"🎉 **Payment Approved!**\nAdmin ne aapka payment verify kar liya"
-            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye ہیں!",
+            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye hain!",
             parse_mode="Markdown",
         )
       except:
@@ -1171,6 +1185,14 @@ def process_order_quantity(message):
       cursor.close()
       conn.close()
 
+      # 🔍 ORDER SUCCESS KE SAATH LIVE STATUS BUTTON ADD KIYA GAYA HAI
+      markup = types.InlineKeyboardMarkup()
+      markup.add(
+          types.InlineKeyboardButton(
+              "🔍 Check Live Status", callback_data=f"chkstatus_{smm_order_id}"
+          )
+      )
+
       bot.reply_to(
           message,
           f"✅ **Order Placed Successfully!**\n\n🆔 Order ID:"
@@ -1179,6 +1201,7 @@ def process_order_quantity(message):
           f" `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance:"
           f" `₹{current_balance - total_cost:.2f}`",
           parse_mode="Markdown",
+          reply_markup=markup,
       )
     else:
       error_msg = smm_data.get("error", "Unknown SMM Error")
