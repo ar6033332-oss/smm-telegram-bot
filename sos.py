@@ -45,6 +45,7 @@ MENU_BUTTONS = [
     "💰 My Balance",
     "📜 My Orders",
     "💳 Add Funds (QR & UPI)",
+    "🎁 Refer & Earn",
     "📞 Support",
 ]
 
@@ -65,7 +66,8 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, balance"
-        " REAL DEFAULT 0.0)"
+        " REAL DEFAULT 0.0, referred_by BIGINT DEFAULT NULL, bonus_given"
+        " BOOLEAN DEFAULT FALSE)"
     )
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value REAL)"
@@ -159,22 +161,30 @@ def get_cached_smm_services():
 def get_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
-  cursor.execute("SELECT balance FROM users WHERE user_id = %s", (user_id,))
+  cursor.execute(
+      "SELECT balance, referred_by, bonus_given FROM users WHERE user_id = %s",
+      (user_id,),
+  )
   row = cursor.fetchone()
   cursor.close()
   conn.close()
   return row
 
 
-def register_user(user_id):
+def register_user(user_id, referred_by=None):
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
-      "INSERT INTO users (user_id, balance) VALUES (%s, 0.0) ON CONFLICT"
-      " (user_id) DO NOTHING",
-      (user_id,),
+      "SELECT user_id FROM users WHERE user_id = %s", (user_id,)
   )
-  conn.commit()
+  exists = cursor.fetchone()
+  if not exists:
+    cursor.execute(
+        "INSERT INTO users (user_id, balance, referred_by, bonus_given) VALUES"
+        " (%s, 0.0, %s, FALSE)",
+        (user_id, referred_by),
+    )
+    conn.commit()
   cursor.close()
   conn.close()
 
@@ -256,6 +266,7 @@ def main_menu():
       types.KeyboardButton("💰 My Balance"),
       types.KeyboardButton("📜 My Orders"),
       types.KeyboardButton("💳 Add Funds (QR & UPI)"),
+      types.KeyboardButton("🎁 Refer & Earn"),
       types.KeyboardButton("📞 Support"),
   )
   return markup
@@ -288,8 +299,18 @@ def platforms_inline_menu():
 def start_handler(message):
   user_id = message.from_user.id
   clear_user_state(user_id)
-  register_user(user_id)
 
+  args = message.text.split()
+  referred_by = None
+  if len(args) > 1 and args[1].startswith("ref_"):
+    try:
+      ref_id = int(args[1].replace("ref_", ""))
+      if ref_id != user_id:
+        referred_by = ref_id
+    except:
+      pass
+
+  register_user(user_id, referred_by=referred_by)
   total_orders = get_updated_count()
 
   bot.send_message(
@@ -400,7 +421,10 @@ def status_command(message):
 
   order_id = parts[1].strip()
   user_id = message.from_user.id
+  check_and_send_status(message.chat.id, user_id, order_id, is_reply=True)
 
+
+def check_and_send_status(chat_id, user_id, order_id, is_reply=False):
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -412,19 +436,21 @@ def status_command(message):
   conn.close()
 
   if not order_row:
-    bot.reply_to(
-        message,
-        "❌ Yeh Order ID database mein nahi mili. Sahi Order ID enter karein.",
-        parse_mode="Markdown",
-    )
+    text = "❌ Yeh Order ID database mein nahi mili. Sahi Order ID enter karein."
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
+    else:
+      bot.send_message(chat_id, text, parse_mode="Markdown")
     return
 
   db_user_id, order_cost, service_name = order_row
 
   if user_id != ADMIN_ID and user_id != db_user_id:
-    bot.reply_to(
-        message, "❌ Aap sirf apne orders ka status check kar sakte hain."
-    )
+    text = "❌ Aap sirf apne orders ka status check kar sakte hain."
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text)
+    else:
+      bot.send_message(chat_id, text)
     return
 
   try:
@@ -433,11 +459,11 @@ def status_command(message):
     res_data = response.json()
 
     if "error" in res_data:
-      bot.reply_to(
-          message,
-          f"❌ **SMM Error:** `{res_data['error']}`",
-          parse_mode="Markdown",
-      )
+      text = f"❌ **SMM Error:** `{res_data['error']}`"
+      if is_reply:
+        bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
+      else:
+        bot.send_message(chat_id, text, parse_mode="Markdown")
       return
 
     status = res_data.get("status", "Unknown")
@@ -460,10 +486,17 @@ def status_command(message):
           " jama kar diye gaye hain kyunki order cancel ho gaya tha."
       )
 
-    bot.reply_to(message, status_msg, parse_mode="Markdown")
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), status_msg, parse_mode="Markdown")
+    else:
+      bot.send_message(chat_id, status_msg, parse_mode="Markdown")
 
   except Exception as e:
-    bot.reply_to(message, f"❌ Status fetch karne mein error aayi: {str(e)}")
+    text = f"❌ Status fetch karne mein error aayi: {str(e)}"
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text)
+    else:
+      bot.send_message(chat_id, text)
 
 
 @bot.message_handler(commands=["broadcast"])
@@ -582,7 +615,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account سے `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -709,9 +742,7 @@ def process_payment_proof(message):
       )
     else:
       proof_text = message.text or "No text"
-      full_text = (
-          f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
-      )
+      full_text = f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
       bot.send_message(
           ADMIN_ID, full_text, parse_mode="Markdown", reply_markup=markup
       )
@@ -750,7 +781,6 @@ def handle_menu_buttons(message):
   elif text == "🔥 Trending Services":
     services = get_cached_smm_services()
     trending_matches = []
-    # Hum kuch popular keywords search karenge jo sabse zyada bikte hain
     for s in services:
       name = s.get("name", "").lower()
       cat = s.get("category", "").lower()
@@ -761,7 +791,7 @@ def handle_menu_buttons(message):
           or "like" in name
       ):
         trending_matches.append(s)
-        if len(trending_matches) >= 10:  # Top 10 trending dikhayenge
+        if len(trending_matches) >= 10:
           break
 
     if not trending_matches:
@@ -770,9 +800,7 @@ def handle_menu_buttons(message):
       )
       return
 
-    list_text = (
-        "🔥 *TOP TRENDING & BEST SERVICES* 🔥\n\n```text\n"
-    )
+    list_text = "🔥 *TOP TRENDING & BEST SERVICES* 🔥\n\n```text\n"
     markup = types.InlineKeyboardMarkup()
 
     for idx, s in enumerate(trending_matches, start=1):
@@ -828,6 +856,30 @@ def handle_menu_buttons(message):
     ask_amount_logic(
         message.chat.id, message.from_user.id, message.from_user.first_name
     )
+  elif text == "🎁 Refer & Earn":
+    bot_info = bot.get_me()
+    bot_username = bot_info.username
+    ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+
+    # Count how many users were referred by this user
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM users WHERE referred_by = %s", (user_id,)
+    )
+    ref_count = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+
+    bot.send_message(
+        message.chat.id,
+        "🎁 **Refer & Earn Program** 🎁\n\n"
+        "Apne dosto ko bot share karein aur jab woh pehli baar funds add karenge,"
+        f" toh aapko bonus milega!\n\n👥 **Total Referrals:** `{ref_count}`\n\n🔗"
+        f" **Aapki Referral Link:**\n`{ref_link}`\n\n*(Link copy karne ke liye"
+        " tap karein)*",
+        parse_mode="Markdown",
+    )
   elif text == "📞 Support":
     bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
 
@@ -836,6 +888,12 @@ def handle_menu_buttons(message):
 def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
+
+  if call.data.startswith("chkstatus_"):
+    order_id = call.data.replace("chkstatus_", "")
+    bot.answer_callback_query(call.id, "Fetching live status...")
+    check_and_send_status(chat_id, user_id, order_id, is_reply=False)
+    return
 
   if call.data.startswith("app_") or call.data.startswith("rej_"):
     if user_id != ADMIN_ID:
@@ -849,7 +907,38 @@ def callback_listener(call):
     if action == "app":
       amount = float(parts[2])
       register_user(target_user_id)
+
+      # Check if this user was referred by someone and hasn't triggered bonus yet
+      user_data = get_user(target_user_id)
+      referred_by = user_data[1] if user_data else None
+      bonus_given = user_data[2] if user_data else True
+
       update_balance(target_user_id, amount)
+
+      # Handle Referral Bonus (e.g., ₹5 bonus to referrer on first fund add)
+      if referred_by and not bonus_given:
+        BONUS_AMOUNT = 5.0
+        update_balance(referred_by, BONUS_AMOUNT)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET bonus_given = TRUE WHERE user_id = %s",
+            (target_user_id,),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        try:
+          bot.send_message(
+              referred_by,
+              f"🎉 **Referral Bonus Received!**\nAapke friend ne pehla fund add"
+              f" kiya, aur aapko `₹{BONUS_AMOUNT}` referral bonus mil gaya"
+              " hai!",
+              parse_mode="Markdown",
+          )
+        except:
+          pass
 
       try:
         bot.edit_message_caption(
@@ -880,7 +969,7 @@ def callback_listener(call):
         bot.send_message(
             target_user_id,
             f"🎉 **Payment Approved!**\nAdmin ne aapka payment verify kar liya"
-            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye ہیں!",
+            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye hain!",
             parse_mode="Markdown",
         )
       except:
@@ -1171,6 +1260,14 @@ def process_order_quantity(message):
       cursor.close()
       conn.close()
 
+      # Inline button for instant status check
+      markup = types.InlineKeyboardMarkup()
+      markup.add(
+          types.InlineKeyboardButton(
+              "🔍 Check Live Status", callback_data=f"chkstatus_{smm_order_id}"
+          )
+      )
+
       bot.reply_to(
           message,
           f"✅ **Order Placed Successfully!**\n\n🆔 Order ID:"
@@ -1179,6 +1276,7 @@ def process_order_quantity(message):
           f" `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance:"
           f" `₹{current_balance - total_cost:.2f}`",
           parse_mode="Markdown",
+          reply_markup=markup,
       )
     else:
       error_msg = smm_data.get("error", "Unknown SMM Error")
