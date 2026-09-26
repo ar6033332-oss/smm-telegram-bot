@@ -550,17 +550,73 @@ def process_payment_proof(message):
     print("Payment proof error:", traceback.format_exc())
 
 
-# Universal message handler for menu buttons
+# ==================== DEDICATED BUTTON HANDLERS ====================
+@bot.message_handler(
+    func=lambda message: message.text
+    and ("My Balance" in message.text or message.text == "💰 My Balance")
+)
+def handle_my_balance(message):
+  try:
+    user_id = message.from_user.id
+    clear_user_state(user_id)
+    register_user(user_id)
+
+    bal_row = get_user(user_id)
+    bal = bal_row[0] if bal_row else 0.0
+    bot.reply_to(
+        message,
+        f"👤 **User ID:** `{user_id}`\n💰 **Balance:** `₹{bal:.2f}`",
+        parse_mode="Markdown",
+    )
+  except Exception as e:
+    print("Balance error:", traceback.format_exc())
+
+
+@bot.message_handler(
+    func=lambda message: message.text
+    and ("Refer & Earn" in message.text or message.text == "🎁 Refer & Earn")
+)
+def handle_refer_earn(message):
+  try:
+    user_id = message.from_user.id
+    clear_user_state(user_id)
+    register_user(user_id)
+
+    bot_info = bot.get_me()
+    bot_username = bot_info.username
+    ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM users WHERE referred_by = %s", (user_id,)
+    )
+    ref_count = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+
+    bot.send_message(
+        message.chat.id,
+        "🎁 **Refer & Earn Program** 🎁\n\n"
+        "Apne dosto ko bot share karein aur jab woh pehli baar funds add karenge,"
+        f" toh aapko bonus milega!\n\n👥 **Total Referrals:** `{ref_count}`\n\n🔗"
+        f" **Aapki Referral Link:**\n`{ref_link}`\n\n*(Link copy karne ke liye"
+        " tap karein)*",
+        parse_mode="Markdown",
+    )
+  except Exception as e:
+    print("Refer error:", traceback.format_exc())
+
+
+# Universal message handler for remaining menu buttons
 @bot.message_handler(
     func=lambda message: message.text in MENU_BUTTONS
     or message.text
     in [
         "🛍 Select Platform",
         "🔥 Trending Services",
-        "💰 My Balance",
         "📜 My Orders",
         "💳 Add Funds (QR & UPI)",
-        "🎁 Refer & Earn",
         "📞 Support",
     ]
 )
@@ -628,14 +684,6 @@ def handle_menu_buttons(message):
           reply_markup=markup,
       )
 
-    elif text == "💰 My Balance":
-      bal_row = get_user(user_id)
-      bal = bal_row[0] if bal_row else 0.0
-      bot.reply_to(
-          message,
-          f"👤 **User ID:** `{user_id}`\n💰 **Balance:** ₹{bal:.2f}",
-          parse_mode="Markdown",
-      )
     elif text == "📜 My Orders":
       conn = get_db_connection()
       cursor = conn.cursor()
@@ -657,29 +705,6 @@ def handle_menu_buttons(message):
     elif text == "💳 Add Funds (QR & UPI)":
       ask_amount_logic(
           message.chat.id, message.from_user.id, message.from_user.first_name
-      )
-    elif text == "🎁 Refer & Earn":
-      bot_info = bot.get_me()
-      bot_username = bot_info.username
-      ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-
-      conn = get_db_connection()
-      cursor = conn.cursor()
-      cursor.execute(
-          "SELECT COUNT(*) FROM users WHERE referred_by = %s", (user_id,)
-      )
-      ref_count = cursor.fetchone()[0]
-      cursor.close()
-      conn.close()
-
-      bot.send_message(
-          message.chat.id,
-          "🎁 **Refer & Earn Program** 🎁\n\n"
-          "Apne dosto ko bot share karein aur jab woh pehli baar funds add karenge,"
-          f" toh aapko bonus milega!\n\n👥 **Total Referrals:** `{ref_count}`\n\n🔗"
-          f" **Aapki Referral Link:**\n`{ref_link}`\n\n*(Link copy karne ke liye"
-          " tap karein)*",
-          parse_mode="Markdown",
       )
     elif text == "📞 Support":
       bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
