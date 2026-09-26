@@ -1299,4 +1299,5 @@ if __name__ == "__main__":
   bot.remove_webhook()
   bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
   port = int(os.environ.get("PORT", 10000))
-  app.run(0.0.0.0, port)
+  app.run("0.0.0.0", port)
+
