@@ -41,6 +41,7 @@ cached_services = []
 
 MENU_BUTTONS = [
     "🛍 Select Platform",
+    "🔥 Trending Services",
     "💰 My Balance",
     "📜 My Orders",
     "💳 Add Funds (QR & UPI)",
@@ -251,6 +252,7 @@ def main_menu():
   markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
   markup.add(
       types.KeyboardButton("🛍 Select Platform"),
+      types.KeyboardButton("🔥 Trending Services"),
       types.KeyboardButton("💰 My Balance"),
       types.KeyboardButton("📜 My Orders"),
       types.KeyboardButton("💳 Add Funds (QR & UPI)"),
@@ -623,13 +625,11 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    # Amount save kar lo state me taaki agle step me kaam aaye
     user_order_state[user_id] = {
         "expecting_utr": True,
         "fund_amount": amount_rs,
     }
 
-    # 🔥 High-Trust & Professional Branding Message Added Here
     bot.send_photo(
         message.chat.id,
         photo=QR_CODE_URL,
@@ -647,7 +647,6 @@ def process_payment_amount(message):
         ),
         parse_mode="Markdown",
     )
-    # Agla step user ke UTR / Proof ke liye
     bot.register_next_step_handler(message, process_payment_proof)
 
   except Exception as e:
@@ -675,7 +674,6 @@ def process_payment_proof(message):
     )
     return
 
-  # Admin ke paas approval ke liye bhejo buttons ke sath
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
       types.InlineKeyboardButton(
@@ -700,7 +698,6 @@ def process_payment_proof(message):
   )
 
   try:
-    # Agar user ne photo bheji hai toh photo forward/send karo
     if message.photo:
       file_id = message.photo[-1].file_id
       bot.send_photo(
@@ -711,7 +708,6 @@ def process_payment_proof(message):
           reply_markup=markup,
       )
     else:
-      # Agar text (UTR) bheja hai
       proof_text = message.text or "No text"
       full_text = (
           f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
@@ -751,6 +747,57 @@ def handle_menu_buttons(message):
         parse_mode="Markdown",
         reply_markup=platforms_inline_menu(),
     )
+  elif text == "🔥 Trending Services":
+    services = get_cached_smm_services()
+    trending_matches = []
+    # Hum kuch popular keywords search karenge jo sabse zyada bikte hain
+    for s in services:
+      name = s.get("name", "").lower()
+      cat = s.get("category", "").lower()
+      if (
+          "follower" in name
+          or "subscriber" in name
+          or "view" in name
+          or "like" in name
+      ):
+        trending_matches.append(s)
+        if len(trending_matches) >= 10:  # Top 10 trending dikhayenge
+          break
+
+    if not trending_matches:
+      bot.reply_to(
+          message, "❌ Filhal koi trending services available nahi hain."
+      )
+      return
+
+    list_text = (
+        "🔥 *TOP TRENDING & BEST SERVICES* 🔥\n\n```text\n"
+    )
+    markup = types.InlineKeyboardMarkup()
+
+    for idx, s in enumerate(trending_matches, start=1):
+      s_name = s.get("name", "")
+      s_cat = s.get("category", "")
+      selling_price = calculate_selling_price(
+          s.get("rate", 0), s_name, s_cat
+      )
+      service_id = str(s.get("service"))
+
+      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
+      markup.add(
+          types.InlineKeyboardButton(
+              f"🛒 #{idx} (ID: {service_id})", callback_data=f"srv_{service_id}"
+          )
+      )
+
+    list_text += "```\n👇 *Service select karne ke liye button dabayein:*"
+    bot.send_message(
+        message.chat.id,
+        list_text,
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
+
   elif text == "💰 My Balance":
     bal_row = get_user(user_id)
     bal = bal_row[0] if bal_row else 0.0
@@ -790,7 +837,6 @@ def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
 
-  # Admin Approval Button Handler
   if call.data.startswith("app_") or call.data.startswith("rej_"):
     if user_id != ADMIN_ID:
       bot.answer_callback_query(call.id, "❌ Aap admin nahi hain!", show_alert=True)
@@ -805,7 +851,6 @@ def callback_listener(call):
       register_user(target_user_id)
       update_balance(target_user_id, amount)
 
-      # Admin message update kar do taaki pata chale approve ho gaya
       try:
         bot.edit_message_caption(
             chat_id=chat_id,
@@ -831,12 +876,11 @@ def callback_listener(call):
 
       bot.answer_callback_query(call.id, f"Successfully added ₹{amount}!")
 
-      # User ko notification bhejo
       try:
         bot.send_message(
             target_user_id,
             f"🎉 **Payment Approved!**\nAdmin ne aapka payment verify kar liya"
-            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye hain!",
+            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye ہیں!",
             parse_mode="Markdown",
         )
       except:
