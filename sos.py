@@ -46,6 +46,7 @@ MENU_BUTTONS = [
     "📜 My Orders",
     "💳 Add Funds (QR & UPI)",
     "📞 Support",
+    "🎁 Refer & Earn",
 ]
 
 # ==================== DATABASE SETUP ====================
@@ -66,6 +67,10 @@ def init_db():
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, balance"
         " REAL DEFAULT 0.0)"
+    )
+    cursor.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT"
+        " 0"
     )
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value REAL)"
@@ -170,8 +175,8 @@ def register_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
-      "INSERT INTO users (user_id, balance) VALUES (%s, 0.0) ON CONFLICT"
-      " (user_id) DO NOTHING",
+      "INSERT INTO users (user_id, balance, referred_by) VALUES (%s, 0.0, 0) ON"
+      " CONFLICT (user_id) DO NOTHING",
       (user_id,),
   )
   conn.commit()
@@ -256,6 +261,7 @@ def main_menu():
       types.KeyboardButton("💰 My Balance"),
       types.KeyboardButton("📜 My Orders"),
       types.KeyboardButton("💳 Add Funds (QR & UPI)"),
+      types.KeyboardButton("🎁 Refer & Earn"),
       types.KeyboardButton("📞 Support"),
   )
   return markup
@@ -289,6 +295,37 @@ def start_handler(message):
   user_id = message.from_user.id
   clear_user_state(user_id)
   register_user(user_id)
+
+  text_parts = message.text.split()
+  if len(text_parts) > 1 and text_parts[1].startswith("ref_"):
+    try:
+      referrer_id = int(text_parts[1].replace("ref_", ""))
+      if referrer_id != user_id:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT referred_by FROM users WHERE user_id = %s", (user_id,)
+        )
+        row = cursor.fetchone()
+        if row and row[0] == 0:
+          cursor.execute(
+              "UPDATE users SET referred_by = %s WHERE user_id = %s",
+              (referrer_id, user_id),
+          )
+          conn.commit()
+          try:
+            bot.send_message(
+                referrer_id,
+                "🎉 **New Referral!** Aapki link se ek naye user ne join kiya"
+                " hai.",
+                parse_mode="Markdown",
+            )
+          except:
+            pass
+        cursor.close()
+        conn.close()
+    except Exception as e:
+      print("Referral error:", e)
 
   total_orders = get_updated_count()
 
@@ -594,7 +631,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account سے `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -835,6 +872,18 @@ def handle_menu_buttons(message):
     ask_amount_logic(
         message.chat.id, message.from_user.id, message.from_user.first_name
     )
+  elif text == "🎁 Refer & Earn":
+    bot_info = bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
+
+    ref_text = (
+        f"🎁 **Refer & Earn Program** 🎁\n\n"
+        f"Apne dosto ko invite karein aur social media services ke liye"
+        f" bot se judein!\n\n"
+        f"🔗 **Aapki Unique Referral Link:**\n`{ref_link}`\n\n"
+        f"👇 Is link ko copy karke apne dosto ke sath share karein!"
+    )
+    bot.reply_to(message, ref_text, parse_mode="Markdown")
   elif text == "📞 Support":
     bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
 
@@ -844,7 +893,6 @@ def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
 
-  # 🔍 LIVE STATUS CHECK HANDLER
   if call.data.startswith("chkstatus_"):
     order_id = call.data.replace("chkstatus_", "")
     bot.answer_callback_query(call.id, "Fetching live status...")
@@ -1185,7 +1233,6 @@ def process_order_quantity(message):
       cursor.close()
       conn.close()
 
-      # 🔍 ORDER SUCCESS KE SAATH LIVE STATUS BUTTON ADD KIYA GAYA HAI
       markup = types.InlineKeyboardMarkup()
       markup.add(
           types.InlineKeyboardButton(
@@ -1252,4 +1299,4 @@ if __name__ == "__main__":
   bot.remove_webhook()
   bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
   port = int(os.environ.get("PORT", 10000))
-  app.run(host="0.0.0.0", port=port)
+  app.run(0.0.0.0, port)
