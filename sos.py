@@ -73,6 +73,9 @@ def init_db():
         " 0"
     )
     cursor.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0"
+    )
+    cursor.execute(
         "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value REAL)"
     )
     cursor.execute(
@@ -164,7 +167,9 @@ def get_cached_smm_services():
 def get_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
-  cursor.execute("SELECT balance FROM users WHERE user_id = %s", (user_id,))
+  cursor.execute(
+      "SELECT balance, points FROM users WHERE user_id = %s", (user_id,)
+  )
   row = cursor.fetchone()
   cursor.close()
   conn.close()
@@ -175,8 +180,8 @@ def register_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
-      "INSERT INTO users (user_id, balance, referred_by) VALUES (%s, 0.0, 0) ON"
-      " CONFLICT (user_id) DO NOTHING",
+      "INSERT INTO users (user_id, balance, referred_by, points) VALUES (%s,"
+      " 0.0, 0, 0) ON CONFLICT (user_id) DO NOTHING",
       (user_id,),
   )
   conn.commit()
@@ -312,16 +317,38 @@ def start_handler(message):
               "UPDATE users SET referred_by = %s WHERE user_id = %s",
               (referrer_id, user_id),
           )
-          conn.commit()
-          try:
-            bot.send_message(
-                referrer_id,
-                "🎉 *New Referral!* Aapki link se ek naye user ne join kiya"
-                " hai.",
-                parse_mode="Markdown",
+
+          cursor.execute(
+              "SELECT points, balance FROM users WHERE user_id = %s",
+              (referrer_id,),
+          )
+          ref_row = cursor.fetchone()
+          if ref_row:
+            # 🔥 Updated random points range from 1 to 15
+            earned_points = random.randint(1, 15)
+            new_points = ref_row[0] + earned_points
+            new_balance = ref_row[1]
+
+            if new_points >= 100:
+              extra_rupees = (new_points // 100) * 1.5
+              new_balance += extra_rupees
+              new_points = new_points % 100
+
+            cursor.execute(
+                "UPDATE users SET points = %s, balance = %s WHERE user_id = %s",
+                (new_points, new_balance, referrer_id),
             )
-          except:
-            pass
+            conn.commit()
+
+            try:
+              bot.send_message(
+                  referrer_id,
+                  f"🎉 *New Referral!* Aapki link se ek naye user ne join kiya"
+                  f" hai, aur aapko mile hain **{earned_points} points**!",
+                  parse_mode="Markdown",
+              )
+            except:
+              pass
         cursor.close()
         conn.close()
     except Exception as e:
@@ -844,10 +871,16 @@ def handle_menu_buttons(message):
 
   elif text == "💰 My Balance":
     bal_row = get_user(user_id)
-    bal = bal_row[0] if bal_row else 0.0
+    if bal_row:
+      bal = bal_row[0]
+      pts = bal_row[1]
+    else:
+      bal = 0.0
+      pts = 0
     bot.reply_to(
         message,
-        f"👤 **User ID:** `{user_id}`\n💰 **Balance:** ₹{bal:.2f}",
+        f"👤 **User ID:** `{user_id}`\n💰 **Balance:** ₹{bal:.2f}\n⭐ **Points:**"
+        f" {pts} pts (100 pts = ₹1.5)",
         parse_mode="Markdown",
     )
   elif text == "📜 My Orders":
@@ -876,10 +909,14 @@ def handle_menu_buttons(message):
     bot_info = bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
 
+    # 🔥 Updated text showing 1-15 points and automatic 100 points = ₹1.5 conversion notice
     ref_text = (
         f"🎁 **Refer & Earn Program** 🎁\n\n"
-        f"Apne dosto ko invite karein aur social media services ke liye"
-        f" bot se judein!\n\n"
+        f"Apne dosto ko invite karein aur har invite par **1 se 15 points**"
+        f" tak jeetein!\n"
+        f"💡 **Note:** jaise hi aapke **100 points** ho jayenge, woh"
+        f" automatically **₹1.5** mein convert ho kar aapke wallet mein add"
+        f" ho jayenge.\n\n"
         f"🔗 **Aapki Unique Referral Link:**\n`{ref_link}`\n\n"
         f"👇 Is link ko copy karke apne dosto ke sath share karein!"
     )
@@ -1300,4 +1337,3 @@ if __name__ == "__main__":
   bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
   port = int(os.environ.get("PORT", 10000))
   app.run("0.0.0.0", port)
-
