@@ -29,7 +29,7 @@ SMM_API_URL = "https://xmediasmm.in/api/v2"
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
 QR_CODE_URL = (
-    "https://cdn.phototourl.com/member/2026-09-29-ea43ee15-1fd7-497b-8e61-5351f9b33373.jpg"
+    "https://cdn.phototourl.com/member/2026-09-29-6a461151-8c48-4048-9f68-b67201cd71ef.jpg"
 )
 ADMIN_USERNAME = "@Socialpookiehelp"
 
