@@ -29,7 +29,7 @@ SMM_API_URL = "https://xmediasmm.in/api/v2"
 ADMIN_ID = 6658716591
 UPI_ID = "arshad79@ptyes"
 QR_CODE_URL = (
-    "https://cdn.phototourl.com/free/2026-09-21-dffdef71-44c0-487e-add8-9e00412d2593.jpg"
+    "https://anonymous-apricot-iblnb9sk.edgeone.dev/"
 )
 ADMIN_USERNAME = "@Socialpookiehelp"
 
@@ -82,6 +82,11 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id"
         " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
         " cost REAL, date_time TEXT)"
+    )
+    # New table to track pending fund requests persistently
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS pending_funds (user_id BIGINT PRIMARY KEY,"
+        " amount REAL, time TIMESTAMP)"
     )
     cursor.execute(
         "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
@@ -324,7 +329,6 @@ def start_handler(message):
           )
           ref_row = cursor.fetchone()
           if ref_row:
-            # 🔥 Updated random points range from 1 to 15
             earned_points = random.randint(1, 15)
             new_points = ref_row[0] + earned_points
             new_balance = ref_row[1]
@@ -701,10 +705,18 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    user_order_state[user_id] = {
-        "expecting_utr": True,
-        "fund_amount": amount_rs,
-    }
+    # Save pending funds permanently in DB so state never gets lost
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO pending_funds (user_id, amount, time) VALUES (%s, %s,"
+        " CURRENT_TIMESTAMP) ON CONFLICT (user_id) DO UPDATE SET amount = %s,"
+        " time = CURRENT_TIMESTAMP",
+        (user_id, amount_rs, amount_rs),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
 
     bot.send_photo(
         message.chat.id,
@@ -723,32 +735,42 @@ def process_payment_amount(message):
         ),
         parse_mode="Markdown",
     )
-    bot.register_next_step_handler(message, process_payment_proof)
 
   except Exception as e:
     clear_user_state(user_id)
     bot.reply_to(message, f"Error: {str(e)}")
 
 
-def process_payment_proof(message):
+# 🔥 Robust Global Message Handler for UTR and Screenshot Proofs using DB state
+@bot.message_handler(
+    content_types=["text", "photo"],
+    func=lambda message: message.from_user.id != ADMIN_ID,
+)
+def handle_payment_proof_global(message):
   user_id = message.from_user.id
 
   if message.text and message.text in MENU_BUTTONS:
-    clear_user_state(user_id)
-    handle_menu_buttons(message)
-    return
+    return  # Let menu handler take care of menu buttons
 
-  state = user_order_state.get(user_id, {})
-  amount_rs = state.get("fund_amount", 0)
+  # Check if this user has a pending fund request in the DB
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
+  )
+  row = cursor.fetchone()
 
-  if not amount_rs:
-    clear_user_state(user_id)
-    bot.reply_to(
-        message,
-        "❌ Session expired ya amount missing. Dobara 'Add Funds' par click"
-        " karein.",
-    )
-    return
+  if not row:
+    cursor.close()
+    conn.close()
+    return  # Not a fund proof, ignore or let other handlers process it
+
+  amount_rs = row[0]
+  # Remove from pending so it's only used once
+  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
+  conn.commit()
+  cursor.close()
+  conn.close()
 
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
@@ -909,7 +931,6 @@ def handle_menu_buttons(message):
     bot_info = bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
 
-    # 🔥 Updated text showing 1-15 points and automatic 100 points = ₹1.5 conversion notice
     ref_text = (
         f"🎁 **Refer & Earn Program** 🎁\n\n"
         f"Apne dosto ko invite karein aur har invite par **1 se 15 points**"
