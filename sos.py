@@ -287,7 +287,7 @@ def platforms_inline_menu():
       types.InlineKeyboardButton(
           "📸 Instagram All", callback_data="plat_instagram_0"
       ),
-      types.InlineKeyboardButton("✈️ Telegram", callback_data="plat_telegram_0"),
+      types.InlineKeyboardButton("✈️️ Telegram", callback_data="plat_telegram_0"),
       types.InlineKeyboardButton("▶️ YouTube", callback_data="plat_youtube_0"),
       types.InlineKeyboardButton("📘 Facebook", callback_data="plat_facebook_0"),
       types.InlineKeyboardButton(
@@ -661,7 +661,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -694,7 +694,7 @@ def ask_amount_logic(chat_id, user_id, first_name):
 
 def process_payment_amount(message):
   user_id = message.from_user.id
-  if message.text in MENU_BUTTONS:
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
@@ -746,7 +746,8 @@ def process_payment_amount(message):
 def handle_payment_proof_global(message):
   user_id = message.from_user.id
 
-  if message.text and message.text in MENU_BUTTONS:
+  # Agar message menu button hai toh payment proof handler ko skip karein
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     return
 
   conn = get_db_connection()
@@ -824,21 +825,24 @@ def handle_payment_proof_global(message):
   clear_user_state(user_id)
 
 
-@bot.message_handler(func=lambda message: message.text in MENU_BUTTONS)
+@bot.message_handler(
+    func=lambda message: message.text
+    and any(btn in message.text for btn in MENU_BUTTONS)
+)
 def handle_menu_buttons(message):
   user_id = message.from_user.id
-  text = message.text
+  text = message.text.strip()
   clear_user_state(user_id)
   register_user(user_id)
 
-  if text == "🛍 Select Platform":
+  if "Select Platform" in text:
     bot.send_message(
         message.chat.id,
         "👇 **Select Platform or Category:**",
         parse_mode="Markdown",
         reply_markup=platforms_inline_menu(),
     )
-  elif text == "🔥 Trending Services":
+  elif "Trending Services" in text:
     services = get_cached_smm_services()
     trending_matches = []
     for s in services:
@@ -886,7 +890,7 @@ def handle_menu_buttons(message):
         reply_markup=markup,
     )
 
-  elif text == "💰 My Balance":
+  elif "My Balance" in text:
     bal_row = get_user(user_id)
     if bal_row:
       bal = bal_row[0]
@@ -900,7 +904,7 @@ def handle_menu_buttons(message):
         f" {pts} pts (100 pts = ₹1.5)",
         parse_mode="Markdown",
     )
-  elif text == "📜 My Orders":
+  elif "My Orders" in text:
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -918,11 +922,11 @@ def handle_menu_buttons(message):
           f"🆔 `{r[0]}` | {r[1]} | Qty: {r[2]} | ₹{r[3]}\n" for r in rows
       ])
       bot.reply_to(message, msg, parse_mode="Markdown")
-  elif text == "💳 Add Funds (QR & UPI)":
+  elif "Add Funds" in text:
     ask_amount_logic(
         message.chat.id, message.from_user.id, message.from_user.first_name
     )
-  elif text == "🎁 Refer & Earn":
+  elif "Refer & Earn" in text:
     bot_info = bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
 
@@ -937,7 +941,7 @@ def handle_menu_buttons(message):
         f"👇 Is link ko copy karke apne dosto ke sath share karein!"
     )
     bot.reply_to(message, ref_text, parse_mode="Markdown")
-  elif text == "📞 Support":
+  elif "Support" in text:
     bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
 
 
@@ -1181,7 +1185,7 @@ def callback_listener(call):
 
 def process_order_link(message):
   user_id = message.from_user.id
-  if message.text in MENU_BUTTONS:
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
@@ -1201,7 +1205,7 @@ def process_order_link(message):
 
 def process_order_quantity(message):
   user_id = message.from_user.id
-  if message.text in MENU_BUTTONS:
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
