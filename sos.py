@@ -84,6 +84,11 @@ def init_db():
         " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
         " cost REAL, date_time TEXT)"
     )
+    # 🔥 Added pending_funds table to prevent missing table errors
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS pending_funds (user_id BIGINT PRIMARY KEY,"
+        " amount REAL, time TIMESTAMP)"
+    )
     cursor.execute(
         "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
         " CONFLICT (key) DO NOTHING"
@@ -315,13 +320,10 @@ def start_handler(message):
         )
         row = cursor.fetchone()
         if row and row[0] == 0:
-          # Mark user as referred
           cursor.execute(
               "UPDATE users SET referred_by = %s WHERE user_id = %s",
               (referrer_id, user_id),
           )
-
-          # 🔥 Fetch referrer current points and balance to update with random 30-70 points
           cursor.execute(
               "SELECT points, balance FROM users WHERE user_id = %s",
               (referrer_id,),
@@ -332,11 +334,10 @@ def start_handler(message):
             new_points = ref_row[0] + earned_points
             new_balance = ref_row[1]
 
-            # 🔥 Logic: 100 points = ₹1.5 conversion
             if new_points >= 100:
               extra_rupees = (new_points // 100) * 1.5
               new_balance += extra_rupees
-              new_points = new_points % 100  # Keep remaining points
+              new_points = new_points % 100
 
             cursor.execute(
                 "UPDATE users SET points = %s, balance = %s WHERE user_id = %s",
@@ -662,7 +663,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -684,7 +685,6 @@ def cut_balance_admin(message):
 
 
 def ask_amount_logic(chat_id, user_id, first_name):
-  user_order_state[user_id] = {"expecting_amount": True}
   msg = bot.send_message(
       chat_id,
       "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)",
@@ -695,7 +695,7 @@ def ask_amount_logic(chat_id, user_id, first_name):
 
 def process_payment_amount(message):
   user_id = message.from_user.id
-  if message.text in MENU_BUTTONS:
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
@@ -705,10 +705,17 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    user_order_state[user_id] = {
-        "expecting_utr": True,
-        "fund_amount": amount_rs,
-    }
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO pending_funds (user_id, amount, time) VALUES (%s, %s,"
+        " NOW()) ON CONFLICT (user_id) DO UPDATE SET amount = EXCLUDED.amount,"
+        " time = NOW()",
+        (user_id, amount_rs),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
 
     bot.send_photo(
         message.chat.id,
@@ -727,32 +734,39 @@ def process_payment_amount(message):
         ),
         parse_mode="Markdown",
     )
-    bot.register_next_step_handler(message, process_payment_proof)
-
   except Exception as e:
     clear_user_state(user_id)
     bot.reply_to(message, f"Error: {str(e)}")
 
 
-def process_payment_proof(message):
+# ==================== GLOBAL PAYMENT PROOF HANDLER ====================
+@bot.message_handler(
+    content_types=["text", "photo"],
+    func=lambda message: message.from_user.id != ADMIN_ID,
+)
+def handle_payment_proof_global(message):
   user_id = message.from_user.id
 
-  if message.text and message.text in MENU_BUTTONS:
-    clear_user_state(user_id)
-    handle_menu_buttons(message)
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     return
 
-  state = user_order_state.get(user_id, {})
-  amount_rs = state.get("fund_amount", 0)
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
+  )
+  row = cursor.fetchone()
 
-  if not amount_rs:
-    clear_user_state(user_id)
-    bot.reply_to(
-        message,
-        "❌ Session expired ya amount missing. Dobara 'Add Funds' par click"
-        " karein.",
-    )
+  if not row:
+    cursor.close()
+    conn.close()
     return
+
+  amount_rs = row[0]
+  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
+  conn.commit()
+  cursor.close()
+  conn.close()
 
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
@@ -801,11 +815,9 @@ def process_payment_proof(message):
         parse_mode="Markdown",
     )
   except Exception as e:
-    print("Admin notification error:", e)
-    bot.reply_to(
-        message,
-        "❌ Proof bhejne mein kuch error aayi. Kripya Support se contact"
-        " karein.",
+    print(
+        "❌ Admin notification error (Kripya check karein ki Admin ne bot ko"
+        f" start kiya hai ya nahi): {e}"
     )
 
   clear_user_state(user_id)
