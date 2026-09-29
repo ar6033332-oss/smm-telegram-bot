@@ -72,7 +72,6 @@ def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT"
         " 0"
     )
-    # 🔥 Added points column for referral system
     cursor.execute(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0"
     )
@@ -84,7 +83,6 @@ def init_db():
         " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
         " cost REAL, date_time TEXT)"
     )
-    # 🔥 Added pending_funds table to prevent missing table errors
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS pending_funds (user_id BIGINT PRIMARY KEY,"
         " amount REAL, time TIMESTAMP)"
@@ -173,7 +171,6 @@ def get_cached_smm_services():
 def get_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
-  # 🔥 Fetching points along with balance
   cursor.execute(
       "SELECT balance, points FROM users WHERE user_id = %s", (user_id,)
   )
@@ -739,90 +736,7 @@ def process_payment_amount(message):
     bot.reply_to(message, f"Error: {str(e)}")
 
 
-# ==================== GLOBAL PAYMENT PROOF HANDLER ====================
-@bot.message_handler(
-    content_types=["text", "photo"],
-    func=lambda message: message.from_user.id != ADMIN_ID,
-)
-def handle_payment_proof_global(message):
-  user_id = message.from_user.id
-
-  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
-    return
-
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
-  )
-  row = cursor.fetchone()
-
-  if not row:
-    cursor.close()
-    conn.close()
-    return
-
-  amount_rs = row[0]
-  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
-  conn.commit()
-  cursor.close()
-  conn.close()
-
-  markup = types.InlineKeyboardMarkup(row_width=2)
-  markup.add(
-      types.InlineKeyboardButton(
-          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs}"
-      ),
-      types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
-  )
-
-  user_name = message.from_user.first_name or "User"
-  user_username = (
-      f"@{message.from_user.username}"
-      if message.from_user.username
-      else "No Username"
-  )
-
-  caption_text = (
-      f"🔔 **New Fund Request!**\n\n"
-      f"👤 User: {user_name} (`{user_id}`)\n"
-      f"🔗 Username: {user_username}\n"
-      f"💰 Amount: `₹{amount_rs}`\n\n"
-      f"Neeche diye gaye button par click karke balance approve karein:"
-  )
-
-  try:
-    if message.photo:
-      file_id = message.photo[-1].file_id
-      bot.send_photo(
-          ADMIN_ID,
-          photo=file_id,
-          caption=caption_text,
-          parse_mode="Markdown",
-          reply_markup=markup,
-      )
-    else:
-      proof_text = message.text or "No text"
-      full_text = f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
-      bot.send_message(
-          ADMIN_ID, full_text, parse_mode="Markdown", reply_markup=markup
-      )
-
-    bot.reply_to(
-        message,
-        "✅ **Payment Proof Submitted!**\nAdmin ne aapka request check kar liya"
-        " hai, jald hi aapke wallet mein balance add ho jayega.",
-        parse_mode="Markdown",
-    )
-  except Exception as e:
-    print(
-        "❌ Admin notification error (Kripya check karein ki Admin ne bot ko"
-        f" start kiya hai ya nahi): {e}"
-    )
-
-  clear_user_state(user_id)
-
-
+# ==================== MENU BUTTONS HANDLER (FIXED & UNIFIED) ====================
 @bot.message_handler(func=lambda message: message.text in MENU_BUTTONS)
 def handle_menu_buttons(message):
   user_id = message.from_user.id
@@ -939,6 +853,90 @@ def handle_menu_buttons(message):
     bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
 
 
+# ==================== GLOBAL PAYMENT PROOF & STATE CATCHER ====================
+@bot.message_handler(
+    content_types=["text", "photo"],
+    func=lambda message: message.from_user.id != ADMIN_ID,
+)
+def handle_payment_proof_global(message):
+  user_id = message.from_user.id
+
+  # Safe guard: agar user ne menu button daba diya, toh handle_menu_buttons sambhal lega
+  if message.text and message.text in MENU_BUTTONS:
+    handle_menu_buttons(message)
+    return
+
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
+  )
+  row = cursor.fetchone()
+
+  if not row:
+    cursor.close()
+    conn.close()
+    return
+
+  amount_rs = row[0]
+  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
+  conn.commit()
+  cursor.close()
+  conn.close()
+
+  markup = types.InlineKeyboardMarkup(row_width=2)
+  markup.add(
+      types.InlineKeyboardButton(
+          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs}"
+      ),
+      types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
+  )
+
+  user_name = message.from_user.first_name or "User"
+  user_username = (
+      f"@{message.from_user.username}"
+      if message.from_user.username
+      else "No Username"
+  )
+
+  caption_text = (
+      f"🔔 **New Fund Request!**\n\n"
+      f"👤 User: {user_name} (`{user_id}`)\n"
+      f"🔗 Username: {user_username}\n"
+      f"💰 Amount: `₹{amount_rs}`\n\n"
+      f"Neeche diye gaye button par click karke balance approve karein:"
+  )
+
+  try:
+    if message.photo:
+      file_id = message.photo[-1].file_id
+      bot.send_photo(
+          ADMIN_ID,
+          photo=file_id,
+          caption=caption_text,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    else:
+      proof_text = message.text or "No text"
+      full_text = f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
+      bot.send_message(
+          ADMIN_ID, full_text, parse_mode="Markdown", reply_markup=markup
+      )
+
+    bot.reply_to(
+        message,
+        "✅ **Payment Proof Submitted!**\nAdmin ne aapka request check kar liya"
+        " hai, jald hi aapke wallet mein balance add ho jayega.",
+        parse_mode="Markdown",
+    )
+  except Exception as e:
+    print(f"❌ Admin notification error: {e}")
+
+  clear_user_state(user_id)
+
+
+# ==================== CALLBACK QUERY LISTENER ====================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_listener(call):
   chat_id = call.message.chat.id
@@ -1179,7 +1177,7 @@ def callback_listener(call):
 
 def process_order_link(message):
   user_id = message.from_user.id
-  if message.text in MENU_BUTTONS:
+  if message.text and message.text in MENU_BUTTONS:
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
@@ -1199,7 +1197,7 @@ def process_order_link(message):
 
 def process_order_quantity(message):
   user_id = message.from_user.id
-  if message.text in MENU_BUTTONS:
+  if message.text and message.text in MENU_BUTTONS:
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
