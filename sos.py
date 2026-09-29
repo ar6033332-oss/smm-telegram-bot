@@ -72,6 +72,7 @@ def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT"
         " 0"
     )
+    # 🔥 Added points column for referral system
     cursor.execute(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0"
     )
@@ -82,10 +83,6 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id"
         " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
         " cost REAL, date_time TEXT)"
-    )
-    cursor.execute(
-        "CREATE TABLE IF NOT EXISTS pending_funds (user_id BIGINT PRIMARY KEY,"
-        " amount REAL, time TIMESTAMP)"
     )
     cursor.execute(
         "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
@@ -171,6 +168,7 @@ def get_cached_smm_services():
 def get_user(user_id):
   conn = get_db_connection()
   cursor = conn.cursor()
+  # 🔥 Fetching points along with balance
   cursor.execute(
       "SELECT balance, points FROM users WHERE user_id = %s", (user_id,)
   )
@@ -287,7 +285,7 @@ def platforms_inline_menu():
       types.InlineKeyboardButton(
           "📸 Instagram All", callback_data="plat_instagram_0"
       ),
-      types.InlineKeyboardButton("✈️️ Telegram", callback_data="plat_telegram_0"),
+      types.InlineKeyboardButton("✈️ Telegram", callback_data="plat_telegram_0"),
       types.InlineKeyboardButton("▶️ YouTube", callback_data="plat_youtube_0"),
       types.InlineKeyboardButton("📘 Facebook", callback_data="plat_facebook_0"),
       types.InlineKeyboardButton(
@@ -317,25 +315,28 @@ def start_handler(message):
         )
         row = cursor.fetchone()
         if row and row[0] == 0:
+          # Mark user as referred
           cursor.execute(
               "UPDATE users SET referred_by = %s WHERE user_id = %s",
               (referrer_id, user_id),
           )
 
+          # 🔥 Fetch referrer current points and balance to update with random 30-70 points
           cursor.execute(
               "SELECT points, balance FROM users WHERE user_id = %s",
               (referrer_id,),
           )
           ref_row = cursor.fetchone()
           if ref_row:
-            earned_points = random.randint(1, 15)
+            earned_points = random.randint(30, 70)
             new_points = ref_row[0] + earned_points
             new_balance = ref_row[1]
 
+            # 🔥 Logic: 100 points = ₹1.5 conversion
             if new_points >= 100:
               extra_rupees = (new_points // 100) * 1.5
               new_balance += extra_rupees
-              new_points = new_points % 100
+              new_points = new_points % 100  # Keep remaining points
 
             cursor.execute(
                 "UPDATE users SET points = %s, balance = %s WHERE user_id = %s",
@@ -661,7 +662,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -694,7 +695,7 @@ def ask_amount_logic(chat_id, user_id, first_name):
 
 def process_payment_amount(message):
   user_id = message.from_user.id
-  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
+  if message.text in MENU_BUTTONS:
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
@@ -704,17 +705,10 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO pending_funds (user_id, amount, time) VALUES (%s, %s,"
-        " CURRENT_TIMESTAMP) ON CONFLICT (user_id) DO UPDATE SET amount = %s,"
-        " time = CURRENT_TIMESTAMP",
-        (user_id, amount_rs, amount_rs),
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
+    user_order_state[user_id] = {
+        "expecting_utr": True,
+        "fund_amount": amount_rs,
+    }
 
     bot.send_photo(
         message.chat.id,
@@ -733,40 +727,32 @@ def process_payment_amount(message):
         ),
         parse_mode="Markdown",
     )
+    bot.register_next_step_handler(message, process_payment_proof)
 
   except Exception as e:
     clear_user_state(user_id)
     bot.reply_to(message, f"Error: {str(e)}")
 
 
-@bot.message_handler(
-    content_types=["text", "photo"],
-    func=lambda message: message.from_user.id != ADMIN_ID,
-)
-def handle_payment_proof_global(message):
+def process_payment_proof(message):
   user_id = message.from_user.id
 
-  # Agar message menu button hai toh payment proof handler ko skip karein
-  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
+  if message.text and message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
     return
 
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
-  )
-  row = cursor.fetchone()
+  state = user_order_state.get(user_id, {})
+  amount_rs = state.get("fund_amount", 0)
 
-  if not row:
-    cursor.close()
-    conn.close()
+  if not amount_rs:
+    clear_user_state(user_id)
+    bot.reply_to(
+        message,
+        "❌ Session expired ya amount missing. Dobara 'Add Funds' par click"
+        " karein.",
+    )
     return
-
-  amount_rs = row[0]
-  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
-  conn.commit()
-  cursor.close()
-  conn.close()
 
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
@@ -825,24 +811,21 @@ def handle_payment_proof_global(message):
   clear_user_state(user_id)
 
 
-@bot.message_handler(
-    func=lambda message: message.text
-    and any(btn in message.text for btn in MENU_BUTTONS)
-)
+@bot.message_handler(func=lambda message: message.text in MENU_BUTTONS)
 def handle_menu_buttons(message):
   user_id = message.from_user.id
-  text = message.text.strip()
+  text = message.text
   clear_user_state(user_id)
   register_user(user_id)
 
-  if "Select Platform" in text:
+  if text == "🛍 Select Platform":
     bot.send_message(
         message.chat.id,
         "👇 **Select Platform or Category:**",
         parse_mode="Markdown",
         reply_markup=platforms_inline_menu(),
     )
-  elif "Trending Services" in text:
+  elif text == "🔥 Trending Services":
     services = get_cached_smm_services()
     trending_matches = []
     for s in services:
@@ -890,7 +873,7 @@ def handle_menu_buttons(message):
         reply_markup=markup,
     )
 
-  elif "My Balance" in text:
+  elif text == "💰 My Balance":
     bal_row = get_user(user_id)
     if bal_row:
       bal = bal_row[0]
@@ -904,7 +887,7 @@ def handle_menu_buttons(message):
         f" {pts} pts (100 pts = ₹1.5)",
         parse_mode="Markdown",
     )
-  elif "My Orders" in text:
+  elif text == "📜 My Orders":
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -922,26 +905,25 @@ def handle_menu_buttons(message):
           f"🆔 `{r[0]}` | {r[1]} | Qty: {r[2]} | ₹{r[3]}\n" for r in rows
       ])
       bot.reply_to(message, msg, parse_mode="Markdown")
-  elif "Add Funds" in text:
+  elif text == "💳 Add Funds (QR & UPI)":
     ask_amount_logic(
         message.chat.id, message.from_user.id, message.from_user.first_name
     )
-  elif "Refer & Earn" in text:
+  elif text == "🎁 Refer & Earn":
     bot_info = bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
 
     ref_text = (
         f"🎁 **Refer & Earn Program** 🎁\n\n"
-        f"Apne dosto ko invite karein aur har invite par **1 se 15 points**"
-        f" tak jeetein!\n"
-        f"💡 **Note:** jaise hi aapke **100 points** ho jayenge, woh"
-        f" automatically **₹1.5** mein convert ho kar aapke wallet mein add"
-        f" ho jayenge.\n\n"
+        f"Apne dosto ko invite karein aur random **30 se 70 points** tak"
+        f" jeetein!\n"
+        f"Jaise hi aapke **100 points** honge, woh automatically **₹1.5** mein"
+        f" convert ho jayenge.\n\n"
         f"🔗 **Aapki Unique Referral Link:**\n`{ref_link}`\n\n"
         f"👇 Is link ko copy karke apne dosto ke sath share karein!"
     )
     bot.reply_to(message, ref_text, parse_mode="Markdown")
-  elif "Support" in text:
+  elif text == "📞 Support":
     bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
 
 
@@ -1185,7 +1167,7 @@ def callback_listener(call):
 
 def process_order_link(message):
   user_id = message.from_user.id
-  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
+  if message.text in MENU_BUTTONS:
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
@@ -1205,7 +1187,7 @@ def process_order_link(message):
 
 def process_order_quantity(message):
   user_id = message.from_user.id
-  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
+  if message.text in MENU_BUTTONS:
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
