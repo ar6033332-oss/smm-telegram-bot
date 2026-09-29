@@ -83,7 +83,6 @@ def init_db():
         " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
         " cost REAL, date_time TEXT)"
     )
-    # New table to track pending fund requests persistently
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS pending_funds (user_id BIGINT PRIMARY KEY,"
         " amount REAL, time TIMESTAMP)"
@@ -662,7 +661,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -705,7 +704,6 @@ def process_payment_amount(message):
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
       return
 
-    # Save pending funds permanently in DB so state never gets lost
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -741,7 +739,6 @@ def process_payment_amount(message):
     bot.reply_to(message, f"Error: {str(e)}")
 
 
-# 🔥 Robust Global Message Handler for UTR and Screenshot Proofs using DB state
 @bot.message_handler(
     content_types=["text", "photo"],
     func=lambda message: message.from_user.id != ADMIN_ID,
@@ -750,9 +747,8 @@ def handle_payment_proof_global(message):
   user_id = message.from_user.id
 
   if message.text and message.text in MENU_BUTTONS:
-    return  # Let menu handler take care of menu buttons
+    return
 
-  # Check if this user has a pending fund request in the DB
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -763,10 +759,9 @@ def handle_payment_proof_global(message):
   if not row:
     cursor.close()
     conn.close()
-    return  # Not a fund proof, ignore or let other handlers process it
+    return
 
   amount_rs = row[0]
-  # Remove from pending so it's only used once
   cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
   conn.commit()
   cursor.close()
