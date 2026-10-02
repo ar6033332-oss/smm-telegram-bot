@@ -737,7 +737,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -759,7 +759,6 @@ def cut_balance_admin(message):
 
 
 def ask_amount_logic(chat_id, user_id, first_name):
-  user_order_state[user_id] = {"mode": "waiting_amount"}
   msg = bot.send_message(
       chat_id,
       "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)",
@@ -783,6 +782,7 @@ def process_payment_amount(message):
       ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
       return
 
+    # Store in database table 'pending_funds' so it never gets lost on restarts
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -794,9 +794,6 @@ def process_payment_amount(message):
     conn.commit()
     cursor.close()
     conn.close()
-
-    # State update kar do taaki agla message proof/UTR mana jaye
-    user_order_state[user_id] = {"mode": "waiting_proof", "amount": amount_rs}
 
     bot.send_photo(
         message.chat.id,
@@ -811,7 +808,7 @@ def process_payment_amount(message):
             "🚨 **IMPORTANT INSTRUCTIONS:**\n"
             f"1️⃣ Upar diye gaye QR ya UPI ID par **₹{amount_rs}** transfer karein.\n"
             "2️⃣ Payment successful hone ke baad **UTR (Transaction ID)** ya **Screenshot** turant yahin bhej dein.\n\n"
-            "⏳ *Wallet mein balance 10 seconds ke andar automatic update kar diya jayega!*"
+            "⏳ *Wallet mein balance verify hone par update kar diya jayega!*"
         ),
         parse_mode="Markdown",
     )
@@ -1024,45 +1021,61 @@ def process_ai_caption(message):
   clear_user_state(user_id)
 
 
-# ==================== GLOBAL PAYMENT PROOF HANDLER ====================
-@bot.message_handler(
-    content_types=["text", "photo"],
-    func=lambda message: message.from_user.id != ADMIN_ID
-    and message.from_user.id in user_order_state
-    and user_order_state.get(message.from_user.id, {}).get("mode")
-    == "waiting_proof",
-)
-def handle_payment_proof_global(message):
-  user_id = message.from_user.id
-
-  if message.text and message.text in MENU_BUTTONS:
-    clear_user_state(user_id)
-    handle_menu_buttons(message)
-    return
-
-  state_data = user_order_state.get(user_id, {})
-  amount_rs = state_data.get("amount", 0.0)
-
-  # Fallback agar database se check karna pade
-  if amount_rs == 0.0:
+# ==================== ROBUST DATABASE-BACKED PAYMENT PROOF HANDLER ====================
+def is_user_pending_funds(user_id):
+  if user_id == ADMIN_ID:
+    return False
+  try:
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
     )
     row = cursor.fetchone()
-    if row:
-      amount_rs = row[0]
-      cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
-      conn.commit()
     cursor.close()
     conn.close()
+    return row is not None
+  except:
+    return False
+
+
+@bot.message_handler(
+    content_types=["text", "photo"],
+    func=lambda message: is_user_pending_funds(message.from_user.id),
+)
+def handle_payment_proof_global(message):
+  user_id = message.from_user.id
+
+  if message.text and message.text in MENU_BUTTONS:
+    # Clear pending funds if they clicked a menu button
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    handle_menu_buttons(message)
+    return
+
+  # Fetch amount from pending_funds table
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
+  )
+  row = cursor.fetchone()
+  amount_rs = row[0] if row else 50.0
+
+  # Remove from pending_funds so they don't get stuck in loop
+  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
+  conn.commit()
+  cursor.close()
+  conn.close()
 
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
       types.InlineKeyboardButton(
-          "✅ Approve",
-          callback_data=f"app_{user_id}_{amount_rs if amount_rs > 0 else 50}",
+          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs}"
       ),
       types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
   )
@@ -1078,7 +1091,7 @@ def handle_payment_proof_global(message):
       f"🔔 **New Fund Request / Payment Proof!**\n\n"
       f"👤 User: {user_name} (`{user_id}`)\n"
       f"🔗 Username: {user_username}\n"
-      f"💰 Expected Amount: `₹{amount_rs if amount_rs > 0 else 'Unknown'}`\n\n"
+      f"💰 Expected Amount: `₹{amount_rs}`\n\n"
       f"Neeche diye gaye button par click karke balance approve karein:"
   )
 
@@ -1107,8 +1120,6 @@ def handle_payment_proof_global(message):
     )
   except Exception as e:
     print(f"❌ Admin notification error: {e}")
-
-  clear_user_state(user_id)
 
 
 # ==================== CALLBACK QUERY LISTENER ====================
