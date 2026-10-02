@@ -419,7 +419,7 @@ def freetrial_command(message):
           parse_mode="Markdown",
       )
     else:
-      free_bonus = 5.0
+      free_bonus = round(random.uniform(0.58, 1.50), 2)
       cursor.execute(
           "UPDATE users SET balance = balance + %s, has_claimed_trial = TRUE"
           " WHERE user_id = %s",
@@ -436,7 +436,7 @@ def freetrial_command(message):
     cursor.close()
     conn.close()
   except Exception as e:
-    bot.reply_to(message, f"⚠️ Error: {str(e)}")
+    bot.reply_to(message, f"⚠️️ Error: {str(e)}")
 
 
 @bot.message_handler(commands=["setmargin"])
