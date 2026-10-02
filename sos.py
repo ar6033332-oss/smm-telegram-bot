@@ -79,7 +79,6 @@ def init_db():
     cursor.execute(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0"
     )
-    # Advanced features new columns/tables
     cursor.execute(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_claimed_trial BOOLEAN"
         " DEFAULT FALSE"
@@ -436,7 +435,7 @@ def freetrial_command(message):
     cursor.close()
     conn.close()
   except Exception as e:
-    bot.reply_to(message, f"⚠️️ Error: {str(e)}")
+    bot.reply_to(message, f"⚠ Error: {str(e)}")
 
 
 @bot.message_handler(commands=["setmargin"])
@@ -745,7 +744,7 @@ def cut_balance_admin(message):
     try:
       bot.send_message(
           target_user_id,
-          f"⚠️ **Balance Deducted:** Admin ne aapke wallet से `₹{amount}` kaat"
+          f"⚠️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
           " liye hain.",
           parse_mode="Markdown",
       )
@@ -995,7 +994,6 @@ def process_ai_caption(message):
     return
 
   topic = message.text.strip()
-  # Smart AI template generator simulation (or real integration ready)
   captions = [
       (
           f"✨ Leveling up every single day! `{topic}` ke sath apne goals ko"
@@ -1039,20 +1037,22 @@ def handle_payment_proof_global(message):
   row = cursor.fetchone()
 
   if not row:
-    cursor.close()
-    conn.close()
-    return
+    # Agar pending funds mein entry nahi bhi hai (jaise user ne state clear hone ke baad bheja ho),
+    # tab bhi UTR ya screenshot ko admin ke paas forward kar diya jayega.
+    amount_rs = 0.0
+  else:
+    amount_rs = row[0]
+    cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
+    conn.commit()
 
-  amount_rs = row[0]
-  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
-  conn.commit()
   cursor.close()
   conn.close()
 
   markup = types.InlineKeyboardMarkup(row_width=2)
+  # Agar amount table mein nahi mila toh default 10 ya custom approve ke liye button banega
   markup.add(
       types.InlineKeyboardButton(
-          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs}"
+          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs if amount_rs > 0 else 10}"
       ),
       types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
   )
@@ -1065,10 +1065,10 @@ def handle_payment_proof_global(message):
   )
 
   caption_text = (
-      f"🔔 **New Fund Request!**\n\n"
+      f"🔔 **New Fund Request / Payment Proof!**\n\n"
       f"👤 User: {user_name} (`{user_id}`)\n"
       f"🔗 Username: {user_username}\n"
-      f"💰 Amount: `₹{amount_rs}`\n\n"
+      f"💰 Expected Amount: `₹{amount_rs if amount_rs > 0 else 'Unknown (Check Screenshot)'}`\n\n"
       f"Neeche diye gaye button par click karke balance approve karein:"
   )
 
