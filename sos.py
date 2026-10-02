@@ -737,7 +737,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -782,7 +782,6 @@ def process_payment_amount(message):
       ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
       return
 
-    # Store in database table 'pending_funds' so it never gets lost on restarts
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -1047,7 +1046,6 @@ def handle_payment_proof_global(message):
   user_id = message.from_user.id
 
   if message.text and message.text in MENU_BUTTONS:
-    # Clear pending funds if they clicked a menu button
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
@@ -1057,7 +1055,6 @@ def handle_payment_proof_global(message):
     handle_menu_buttons(message)
     return
 
-  # Fetch amount from pending_funds table
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -1066,7 +1063,6 @@ def handle_payment_proof_global(message):
   row = cursor.fetchone()
   amount_rs = row[0] if row else 50.0
 
-  # Remove from pending_funds so they don't get stuck in loop
   cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
   conn.commit()
   cursor.close()
@@ -1700,11 +1696,18 @@ def keep_alive():
     time.sleep(300)
 
 
-if __name__ == "__main__":
+# ==================== WEBHOOK & THREAD AUTO-SETUP ====================
+# Yeh block Gunicorn aur Flask dono ke liye webhook instantly set kar dega
+with app.app_context():
   threading.Thread(target=fetch_services_background, daemon=True).start()
   threading.Thread(target=keep_alive, daemon=True).start()
+  try:
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+    print(f"Webhook successfully configured to: {RENDER_URL}/{BOT_TOKEN}")
+  except Exception as e:
+    print(f"Webhook setup error: {e}")
 
-  bot.remove_webhook()
-  bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+if __name__ == "__main__":
   port = int(os.environ.get("PORT", 10000))
   app.run("0.0.0.0", port)
