@@ -744,7 +744,7 @@ def cut_balance_admin(message):
     try:
       bot.send_message(
           target_user_id,
-          f"⚠️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
+          f"⚠️️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
           " liye hain.",
           parse_mode="Markdown",
       )
@@ -769,14 +769,18 @@ def ask_amount_logic(chat_id, user_id, first_name):
 
 def process_payment_amount(message):
   user_id = message.from_user.id
+  
+  # Agar user ne menu buttons click kar diye
   if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     clear_user_state(user_id)
     handle_menu_buttons(message)
     return
+
   try:
     amount_rs = float(message.text.strip())
     if amount_rs < 10:
       bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
+      ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
       return
 
     conn = get_db_connection()
@@ -808,9 +812,10 @@ def process_payment_amount(message):
         ),
         parse_mode="Markdown",
     )
-  except Exception as e:
-    clear_user_state(user_id)
-    bot.reply_to(message, f"Error: {str(e)}")
+  except ValueError:
+    # AGAR USER NE AMOUNT KE BAJAYE SIDHE UTR TEXT BHEJ DIYA (jaise screenshot mein hua)
+    # Toh yeh error dene ki jagah seedha handle_payment_proof_global ko call kar dega!
+    handle_payment_proof_global(message)
 
 
 # ==================== MENU BUTTONS HANDLER ====================
@@ -1029,6 +1034,8 @@ def handle_payment_proof_global(message):
     handle_menu_buttons(message)
     return
 
+  # Agar order ya kisi doosre active step mein hai aur woh command ya menu nahi hai, 
+  # toh usko yahan filter kar sakte hain ya seedha process kar sakte hain.
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -1037,8 +1044,6 @@ def handle_payment_proof_global(message):
   row = cursor.fetchone()
 
   if not row:
-    # Agar pending funds mein entry nahi bhi hai (jaise user ne state clear hone ke baad bheja ho),
-    # tab bhi UTR ya screenshot ko admin ke paas forward kar diya jayega.
     amount_rs = 0.0
   else:
     amount_rs = row[0]
@@ -1049,10 +1054,9 @@ def handle_payment_proof_global(message):
   conn.close()
 
   markup = types.InlineKeyboardMarkup(row_width=2)
-  # Agar amount table mein nahi mila toh default 10 ya custom approve ke liye button banega
   markup.add(
       types.InlineKeyboardButton(
-          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs if amount_rs > 0 else 10}"
+          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs if amount_rs > 0 else 50}"
       ),
       types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
   )
@@ -1068,7 +1072,7 @@ def handle_payment_proof_global(message):
       f"🔔 **New Fund Request / Payment Proof!**\n\n"
       f"👤 User: {user_name} (`{user_id}`)\n"
       f"🔗 Username: {user_username}\n"
-      f"💰 Expected Amount: `₹{amount_rs if amount_rs > 0 else 'Unknown (Check Screenshot)'}`\n\n"
+      f"💰 Expected Amount: `₹{amount_rs if amount_rs > 0 else 'Unknown / Check Screenshot'}`\n\n"
       f"Neeche diye gaye button par click karke balance approve karein:"
   )
 
@@ -1484,7 +1488,7 @@ def process_order_quantity(message):
               "🔍 Check Live Status", callback_data=f"chkstatus_{smm_order_id}"
           ),
           types.InlineKeyboardButton(
-              "♻️ Request Refill", callback_data=f"refillreq_{smm_order_id}"
+              "♻️️ Request Refill", callback_data=f"refillreq_{smm_order_id}"
           ),
       )
 
