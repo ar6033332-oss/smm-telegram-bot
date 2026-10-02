@@ -744,7 +744,7 @@ def cut_balance_admin(message):
     try:
       bot.send_message(
           target_user_id,
-          f"⚠️️ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
+          f"⚠ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
           " liye hain.",
           parse_mode="Markdown",
       )
@@ -770,7 +770,6 @@ def ask_amount_logic(chat_id, user_id, first_name):
 def process_payment_amount(message):
   user_id = message.from_user.id
   
-  # Agar user ne menu buttons click kar diye
   if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     clear_user_state(user_id)
     handle_menu_buttons(message)
@@ -813,8 +812,6 @@ def process_payment_amount(message):
         parse_mode="Markdown",
     )
   except ValueError:
-    # AGAR USER NE AMOUNT KE BAJAYE SIDHE UTR TEXT BHEJ DIYA (jaise screenshot mein hua)
-    # Toh yeh error dene ki jagah seedha handle_payment_proof_global ko call kar dega!
     handle_payment_proof_global(message)
 
 
@@ -1034,8 +1031,6 @@ def handle_payment_proof_global(message):
     handle_menu_buttons(message)
     return
 
-  # Agar order ya kisi doosre active step mein hai aur woh command ya menu nahi hai, 
-  # toh usko yahan filter kar sakte hain ya seedha process kar sakte hain.
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -1488,7 +1483,7 @@ def process_order_quantity(message):
               "🔍 Check Live Status", callback_data=f"chkstatus_{smm_order_id}"
           ),
           types.InlineKeyboardButton(
-              "♻️️ Request Refill", callback_data=f"refillreq_{smm_order_id}"
+              "♻ Request Refill", callback_data=f"refillreq_{smm_order_id}"
           ),
       )
 
