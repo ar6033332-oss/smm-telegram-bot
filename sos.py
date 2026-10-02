@@ -737,7 +737,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -770,7 +770,7 @@ def ask_amount_logic(chat_id, user_id, first_name):
 
 def process_payment_amount(message):
   user_id = message.from_user.id
-  
+
   if message.text and any(btn in message.text for btn in MENU_BUTTONS):
     clear_user_state(user_id)
     handle_menu_buttons(message)
@@ -816,7 +816,9 @@ def process_payment_amount(message):
         parse_mode="Markdown",
     )
   except ValueError:
-    bot.reply_to(message, "❌ Kripya sirf valid number likhein (jaise: 50 ya 100).")
+    bot.reply_to(
+        message, "❌ Kripya sirf valid number likhein (jaise: 50 ya 100)."
+    )
     ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
 
 
@@ -921,9 +923,7 @@ def handle_menu_buttons(message):
       msg = "📜 **Recent Orders & Refill Options:**\n\n" + "".join([
           f"🆔 `{r[0]}` | {r[1]} | Qty: {r[2]} | ₹{r[3]}\n" for r in rows
       ])
-      bot.reply_to(
-          message, msg, parse_mode="Markdown", reply_markup=markup
-      )
+      bot.reply_to(message, msg, parse_mode="Markdown", reply_markup=markup)
   elif text == "💳 Add Funds (QR & UPI)":
     ask_amount_logic(
         message.chat.id, message.from_user.id, message.from_user.first_name
@@ -1029,7 +1029,8 @@ def process_ai_caption(message):
     content_types=["text", "photo"],
     func=lambda message: message.from_user.id != ADMIN_ID
     and message.from_user.id in user_order_state
-    and user_order_state.get(message.from_user.id, {}).get("mode") == "waiting_proof"
+    and user_order_state.get(message.from_user.id, {}).get("mode")
+    == "waiting_proof",
 )
 def handle_payment_proof_global(message):
   user_id = message.from_user.id
@@ -1060,7 +1061,8 @@ def handle_payment_proof_global(message):
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
       types.InlineKeyboardButton(
-          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs if amount_rs > 0 else 50}"
+          "✅ Approve",
+          callback_data=f"app_{user_id}_{amount_rs if amount_rs > 0 else 50}",
       ),
       types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
   )
@@ -1147,14 +1149,14 @@ def callback_listener(call):
           parse_mode="Markdown",
       )
     except Exception as e:
-      bot.answer_callback_query(
-          call.id, f"Error: {str(e)}", show_alert=True
-      )
+      bot.answer_callback_query(call.id, f"Error: {str(e)}", show_alert=True)
     return
 
   if call.data.startswith("app_") or call.data.startswith("rej_"):
     if user_id != ADMIN_ID:
-      bot.answer_callback_query(call.id, "❌ Aap admin nahi hain!", show_alert=True)
+      bot.answer_callback_query(
+          call.id, "❌ Aap admin nahi hain!", show_alert=True
+      )
       return
 
     parts = call.data.split("_")
@@ -1182,7 +1184,10 @@ def callback_listener(call):
           bot.edit_message_text(
               chat_id=chat_id,
               message_id=call.message.message_id,
-              text=f"{call.message.text}\n\n✅ **STATUS: APPROVED** (₹{amount} Added)",
+              text=(
+                  f"{call.message.text}\n\n✅ **STATUS: APPROVED** (₹{amount}"
+                  " Added)"
+              ),
               parse_mode="Markdown",
               reply_markup=None,
           )
@@ -1386,7 +1391,10 @@ def process_order_link(message):
     handle_menu_buttons(message)
     return
 
-  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
+  if (
+      user_id not in user_order_state
+      or "service_id" not in user_order_state[user_id]
+  ):
     bot.reply_to(message, "❌ Session expired. Dobara start karein.")
     return
 
@@ -1406,7 +1414,10 @@ def process_order_quantity(message):
     handle_menu_buttons(message)
     return
 
-  if user_id not in user_order_state or "service_id" not in user_order_state[user_id]:
+  if (
+      user_id not in user_order_state
+      or "service_id" not in user_order_state[user_id]
+  ):
     bot.reply_to(message, "❌ Session expired. Dobara start karein.")
     return
 
@@ -1595,7 +1606,9 @@ def reseller_api_v2():
 
     wholesale_rate = float(selected_service.get("rate", 0))
     unit_price = calculate_selling_price(
-        wholesale_rate, selected_service.get("name"), selected_service.get("category")
+        wholesale_rate,
+        selected_service.get("name"),
+        selected_service.get("category"),
     )
     total_cost = round((unit_price * quantity) / 1000.0, 2)
 
