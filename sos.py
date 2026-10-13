@@ -51,7 +51,9 @@ MENU_BUTTONS = [
     "🤖 AI Caption Generator",
     "🔑 Reseller API",
     "📞 Support",
+    "👑 View All Users",  # Admin Button Added here
 ]
+
 
 # ==================== DATABASE SETUP ====================
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -165,7 +167,7 @@ def fetch_services_background():
           cached_services = res_data
     except Exception as e:
       print("Background fetch error:", e)
-    time.sleep(120)  # Refresh every 2 minutes for instant availability
+    time.sleep(120)
 
 
 def get_cached_smm_services():
@@ -280,7 +282,7 @@ def clear_user_state(user_id):
 
 
 # ==================== KEYBOARDS ====================
-def main_menu():
+def main_menu(user_id):
   markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
   markup.add(
       types.KeyboardButton("🛍 Select Platform"),
@@ -295,6 +297,9 @@ def main_menu():
       types.KeyboardButton("🔑 Reseller API"),
       types.KeyboardButton("📞 Support"),
   )
+  # Sirf Admin ko dikhega yeh button
+  if user_id == ADMIN_ID:
+    markup.add(types.KeyboardButton("👑 View All Users"))
   return markup
 
 
@@ -386,8 +391,136 @@ def start_handler(message):
       f"🚀 Total Successful Orders: **{total_orders:,}+**\n\n"
       "Welcome to Social Media Services Bot!",
       parse_mode="Markdown",
-      reply_markup=main_menu(),
+      reply_markup=main_menu(user_id),
   )
+
+
+# ==================== ADMIN USERS PANEL BUTTON HANDLER ====================
+@bot.message_handler(func=lambda message: message.text == "👑 View All Users")
+def handle_admin_users_button(message):
+  if message.from_user.id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh feature sirf Admin ke liye hai!")
+    return
+
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT COUNT(*) FROM users")
+  total_users = cursor.fetchone()[0]
+  cursor.close()
+  conn.close()
+
+  if total_users == 0:
+    bot.reply_to(message, "⚠️ Database mein koi user nahi hai!")
+    return
+
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT user_id, balance FROM users ORDER BY user_id DESC LIMIT 20")
+  all_users = cursor.fetchall()
+  cursor.close()
+  conn.close()
+
+  inline_markup = types.InlineKeyboardMarkup()
+  for user in all_users:
+    u_id = user[0]
+    u_bal = user[1]
+    btn_text = f"👤 ID: {u_id} | ₹{u_bal:.2f}"
+    inline_markup.add(
+        types.InlineKeyboardButton(
+            text=btn_text, callback_data=f"userdetail_{u_id}"
+        )
+    )
+
+  response_text = (
+      f"📊 **ADMIN PANEL - USERS LIST**\n\n"
+      f"👥 **Total Registered Users:** `{total_users}`\n\n"
+      f"Kisi user ki detail dekhne ke liye uske button par click karein:"
+  )
+
+  bot.send_message(
+      message.chat.id, response_text, parse_mode="Markdown", reply_markup=inline_markup
+  )
+
+
+# ==================== USER DETAIL CALLBACK HANDLER ====================
+@bot.callback_query_handler(func=lambda call: call.data.startswith("userdetail_"))
+def handle_user_detail_callback(call):
+  if call.from_user.id != ADMIN_ID:
+    bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
+    return
+
+  try:
+    target_user_id = int(call.data.split("_")[1])
+  except ValueError:
+    bot.answer_callback_query(call.id, "Invalid User ID!", show_alert=True)
+    return
+
+  user_row = get_user(target_user_id)
+  if not user_row:
+    bot.answer_callback_query(call.id, "User database mein nahi mila!", show_alert=True)
+    return
+
+  balance = user_row[0]
+  points = user_row[1]
+
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT order_id, service_name, quantity, cost, status, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
+      (target_user_id,),
+  )
+  # Check if table has status column or not, safely fetch matching rows
+  cursor.close()
+  
+  # Let's use a safer query matching your orders table schema
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT order_id, service_name, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
+      (target_user_id,),
+  )
+  user_orders = cursor.fetchall()
+  cursor.close()
+  conn.close()
+
+  total_orders_count = len(user_orders)
+
+  details_text = f"👤 **USER DETAILS**\n"
+  details_text += f"━━━━━━━━━━━━━━━━━━\n"
+  details_text += f"🆔 **User ID:** `{target_user_id}`\n"
+  details_text += f"💰 **Wallet Balance:** ₹{balance:.2f}\n"
+  details_text += f"⭐ **Points:** {points}\n"
+  details_text += f"📦 **Total Orders Placed:** {total_orders_count}\n\n"
+
+  if total_orders_count > 0:
+    details_text += f"🛒 **Recent Orders (Last 5):**\n"
+    for i, order in enumerate(user_orders[:5], 1):
+      s_id, s_name, qty, cost, d_time = order
+      details_text += f"\n{i}. **{s_name}** (ID: `{s_id}`)\n"
+      details_text += f"   • Qty: {qty} | Cost: ₹{cost}\n"
+      details_text += f"   • Date: {d_time}\n"
+  else:
+    details_text += "📦 **Recent Orders:** Is user ne abhi tak koi order nahi lagaya."
+
+  back_markup = types.InlineKeyboardMarkup()
+  back_markup.add(
+      types.InlineKeyboardButton("❌ Close Details", callback_data="close_details")
+  )
+
+  bot.edit_message_text(
+      chat_id=call.message.chat.id,
+      message_id=call.message.message_id,
+      text=details_text,
+      parse_mode="Markdown",
+      reply_markup=back_markup,
+  )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "close_details")
+def close_details_callback(call):
+  try:
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+  except:
+    pass
 
 
 @bot.message_handler(commands=["addfunds"])
@@ -737,7 +870,7 @@ def cut_balance_admin(message):
     update_balance(target_user_id, -amount)
     bot.reply_to(
         message,
-        f"✅ Success! User `{target_user_id}` ke account से `₹{amount}` kaat"
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
         " liye gaye hain.",
         parse_mode="Markdown",
     )
@@ -943,7 +1076,7 @@ def handle_menu_buttons(message):
   elif text == "♻️ Request Refill":
     bot.reply_to(
         message,
-        "♻️️ **Auto-Refill Instructions:**\nApne `/myorders` ya status check"
+        "♻ **Auto-Refill Instructions:**\nApne `/myorders` ya status check"
         " section mein jayenge toh wahan har order ke sath **'Request Refill'"
         " ka button mil jayega, wahan se click karein!",
         parse_mode="Markdown",
@@ -1123,6 +1256,9 @@ def handle_payment_proof_global(message):
 def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
+
+  if call.data.startswith("userdetail_") or call.data == "close_details":
+    return
 
   if call.data.startswith("chkstatus_"):
     order_id = call.data.replace("chkstatus_", "")
