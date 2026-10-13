@@ -51,9 +51,8 @@ MENU_BUTTONS = [
     "🤖 AI Caption Generator",
     "🔑 Reseller API",
     "📞 Support",
-    "👑 View All Users",  # Admin Button Added here
+    "👑 View All Users",
 ]
-
 
 # ==================== DATABASE SETUP ====================
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -121,7 +120,6 @@ def init_db():
 
 
 init_db()
-
 
 # ==================== DYNAMIC ORDER COUNT LOGIC ====================
 DATA_FILE = "bot_stats.json"
@@ -297,7 +295,6 @@ def main_menu(user_id):
       types.KeyboardButton("🔑 Reseller API"),
       types.KeyboardButton("📞 Support"),
   )
-  # Sirf Admin ko dikhega yeh button
   if user_id == ADMIN_ID:
     markup.add(types.KeyboardButton("👑 View All Users"))
   return markup
@@ -407,13 +404,12 @@ def handle_admin_users_button(message):
   cursor.execute("SELECT COUNT(*) FROM users")
   total_users = cursor.fetchone()[0]
   cursor.close()
-  conn.close()
 
   if total_users == 0:
+    conn.close()
     bot.reply_to(message, "⚠️ Database mein koi user nahi hai!")
     return
 
-  conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute("SELECT user_id, balance FROM users ORDER BY user_id DESC LIMIT 20")
   all_users = cursor.fetchall()
@@ -440,87 +436,6 @@ def handle_admin_users_button(message):
   bot.send_message(
       message.chat.id, response_text, parse_mode="Markdown", reply_markup=inline_markup
   )
-
-
-# ==================== USER DETAIL CALLBACK HANDLER ====================
-@bot.callback_query_handler(func=lambda call: call.data.startswith("userdetail_"))
-def handle_user_detail_callback(call):
-  if call.from_user.id != ADMIN_ID:
-    bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
-    return
-
-  try:
-    target_user_id = int(call.data.split("_")[1])
-  except ValueError:
-    bot.answer_callback_query(call.id, "Invalid User ID!", show_alert=True)
-    return
-
-  user_row = get_user(target_user_id)
-  if not user_row:
-    bot.answer_callback_query(call.id, "User database mein nahi mila!", show_alert=True)
-    return
-
-  balance = user_row[0]
-  points = user_row[1]
-
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT order_id, service_name, quantity, cost, status, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
-      (target_user_id,),
-  )
-  # Check if table has status column or not, safely fetch matching rows
-  cursor.close()
-  
-  # Let's use a safer query matching your orders table schema
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT order_id, service_name, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
-      (target_user_id,),
-  )
-  user_orders = cursor.fetchall()
-  cursor.close()
-  conn.close()
-
-  total_orders_count = len(user_orders)
-
-  details_text = f"👤 **USER DETAILS**\n"
-  details_text += f"━━━━━━━━━━━━━━━━━━\n"
-  details_text += f"🆔 **User ID:** `{target_user_id}`\n"
-  details_text += f"💰 **Wallet Balance:** ₹{balance:.2f}\n"
-  details_text += f"⭐ **Points:** {points}\n"
-  details_text += f"📦 **Total Orders Placed:** {total_orders_count}\n\n"
-
-  if total_orders_count > 0:
-    details_text += f"🛒 **Recent Orders (Last 5):**\n"
-    for i, order in enumerate(user_orders[:5], 1):
-      s_id, s_name, qty, cost, d_time = order
-      details_text += f"\n{i}. **{s_name}** (ID: `{s_id}`)\n"
-      details_text += f"   • Qty: {qty} | Cost: ₹{cost}\n"
-      details_text += f"   • Date: {d_time}\n"
-  else:
-    details_text += "📦 **Recent Orders:** Is user ne abhi tak koi order nahi lagaya."
-
-  back_markup = types.InlineKeyboardMarkup()
-  back_markup.add(
-      types.InlineKeyboardButton("❌ Close Details", callback_data="close_details")
-  )
-
-  bot.edit_message_text(
-      chat_id=call.message.chat.id,
-      message_id=call.message.message_id,
-      text=details_text,
-      parse_mode="Markdown",
-      reply_markup=back_markup,
-  )
-
-
-@bot.callback_query_handler(func=lambda call: call.data == "close_details")
-def close_details_callback(call):
-  try:
-    bot.delete_message(call.message.chat.id, call.message.message_id)
-  except:
-    pass
 
 
 @bot.message_handler(commands=["addfunds"])
@@ -1257,15 +1172,85 @@ def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
 
-  if call.data.startswith("userdetail_") or call.data == "close_details":
+  # 1. ADMIN - USER DETAILS VIEW (Ab yeh sabse upar hai taki turant trigger ho)
+  if call.data.startswith("userdetail_"):
+    if user_id != ADMIN_ID:
+      bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
+      return
+
+    try:
+      target_user_id = int(call.data.split("_")[1])
+    except ValueError:
+      bot.answer_callback_query(call.id, "Invalid User ID!", show_alert=True)
+      return
+
+    user_row = get_user(target_user_id)
+    if not user_row:
+      bot.answer_callback_query(call.id, "User database mein nahi mila!", show_alert=True)
+      return
+
+    balance = user_row[0]
+    points = user_row[1]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT order_id, service_name, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
+        (target_user_id,),
+    )
+    user_orders = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    total_orders_count = len(user_orders)
+
+    details_text = f"👤 **USER DETAILS**\n"
+    details_text += f"━━━━━━━━━━━━━━━━━━\n"
+    details_text += f"🆔 **User ID:** `{target_user_id}`\n"
+    details_text += f"💰 **Wallet Balance:** ₹{balance:.2f}\n"
+    details_text += f"⭐ **Points:** {points}\n"
+    details_text += f"📦 **Total Orders Placed:** {total_orders_count}\n\n"
+
+    if total_orders_count > 0:
+      details_text += f"🛒 **Recent Orders (Last 5):**\n"
+      for i, order in enumerate(user_orders[:5], 1):
+        s_id, s_name, qty, cost, d_time = order
+        details_text += f"\n{i}. **{s_name}** (ID: `{s_id}`)\n"
+        details_text += f"   • Qty: {qty} | Cost: ₹{cost}\n"
+        details_text += f"   • Date: {d_time}\n"
+    else:
+      details_text += "📦 **Recent Orders:** Is user ne abhi tak koi order nahi lagaya."
+
+    back_markup = types.InlineKeyboardMarkup()
+    back_markup.add(
+        types.InlineKeyboardButton("❌ Close Details", callback_data="close_details")
+    )
+
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=details_text,
+        parse_mode="Markdown",
+        reply_markup=back_markup,
+    )
     return
 
+  # 2. CLOSE DETAILS BUTTON
+  if call.data == "close_details":
+    try:
+      bot.delete_message(chat_id, call.message.message_id)
+    except:
+      pass
+    return
+
+  # 3. CHECK ORDER STATUS
   if call.data.startswith("chkstatus_"):
     order_id = call.data.replace("chkstatus_", "")
     bot.answer_callback_query(call.id, "Fetching live status...")
     check_and_send_status(chat_id, user_id, order_id, is_reply=False)
     return
 
+  # 4. REFILL REQUEST
   if call.data.startswith("refillreq_"):
     order_id = call.data.replace("refillreq_", "")
     try:
@@ -1295,6 +1280,7 @@ def callback_listener(call):
       bot.answer_callback_query(call.id, f"Error: {str(e)}", show_alert=True)
     return
 
+  # 5. APPROVE / REJECT PAYMENT
   if call.data.startswith("app_") or call.data.startswith("rej_"):
     if user_id != ADMIN_ID:
       bot.answer_callback_query(
@@ -1383,6 +1369,7 @@ def callback_listener(call):
         pass
     return
 
+  # 6. PLATFORM CATEGORY NAVIGATION
   if call.data.startswith("plat_"):
     bot.answer_callback_query(call.id, "Loading services...")
 
@@ -1514,6 +1501,7 @@ def callback_listener(call):
           reply_markup=markup,
       )
 
+  # 7. SERVICE SELECT HANDLER
   elif call.data.startswith("srv_"):
     service_id = call.data.replace("srv_", "")
     bot.answer_callback_query(call.id)
