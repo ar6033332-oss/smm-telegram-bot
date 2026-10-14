@@ -279,6 +279,29 @@ def clear_user_state(user_id):
     del user_order_state[user_id]
 
 
+# Helper function to notify admin on new order
+def notify_admin_new_order(user_id, order_id, service_name, link, quantity, cost, new_balance, user_name="N/A", user_username="N/A"):
+  try:
+    admin_msg = (
+        f"🚨 **NEW ORDER PLACED!** 🚨\n\n"
+        f"👤 **User:** {user_name}\n"
+        f"🆔 **User ID:** `{user_id}`\n"
+        f"🔗 **Username:** @{user_username}\n\n"
+        f"🛒 **Order Details:**\n"
+        f"• **Order ID:** `{order_id}`\n"
+        f"• **Service:** `{service_name}`\n"
+        f"• **Quantity:** `{quantity}`\n"
+        f"• **Link:** `{link}`\n\n"
+        f"💰 **Cost:** `₹{cost}`\n"
+        f"📉 **Remaining Balance:** `₹{new_balance:.2f}`"
+    )
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔍 Check Status", callback_data=f"chkstatus_{order_id}"))
+    bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown", reply_markup=markup)
+  except Exception as e:
+    print(f"Failed to notify admin: {e}")
+
+
 # ==================== KEYBOARDS ====================
 def main_menu(user_id):
   markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -1172,7 +1195,7 @@ def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
 
-  # 1. ADMIN - USER DETAILS VIEW (Ab yeh sabse upar hai taki turant trigger ho)
+  # 1. ADMIN - USER DETAILS VIEW
   if call.data.startswith("userdetail_"):
     if user_id != ADMIN_ID:
       bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
@@ -1638,16 +1661,24 @@ def process_order_quantity(message):
           ),
       )
 
+      rem_balance = current_balance - total_cost
+
       bot.reply_to(
           message,
           f"✅ **Order Placed Successfully!**\n\n🆔 Order ID:"
           f" `{smm_order_id}`\n📦 Service:"
           f" `{selected_service.get('name')}`\n🔗 Link: `{link}`\n📊 Quantity:"
           f" `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance:"
-          f" `₹{current_balance - total_cost:.2f}`",
+          f" `₹{rem_balance:.2f}`",
           parse_mode="Markdown",
           reply_markup=markup,
       )
+
+      # ADMIN NOTIFICATION CALL
+      user_name = message.from_user.first_name or "N/A"
+      user_username = message.from_user.username or "No Username"
+      notify_admin_new_order(user_id, smm_order_id, selected_service.get('name'), link, quantity, total_cost, rem_balance, user_name, user_username)
+
     else:
       error_msg = smm_data.get("error", "Unknown SMM Error")
       bot.reply_to(
@@ -1778,6 +1809,10 @@ def reseller_api_v2():
       conn.commit()
       cursor.close()
       conn.close()
+
+      # API Order Admin Notification
+      rem_balance = balance - total_cost
+      notify_admin_new_order(user_id, smm_order_id, selected_service.get('name'), link, quantity, total_cost, rem_balance, "API User", "Reseller_API")
 
       return json.dumps({"order": smm_order_id}), 200
     else:
