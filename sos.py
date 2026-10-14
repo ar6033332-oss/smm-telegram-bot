@@ -917,7 +917,7 @@ def handle_menu_buttons(message):
             )
             return
 
-        # Sort by cheapest/lowest price first
+        # Srif sabse sasti (cheapest) services ko low-to-high sort karke top 10 lenge
         trending_matches = sorted(
             trending_matches, key=lambda x: x["calculated_price"]
         )
