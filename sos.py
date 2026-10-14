@@ -42,6 +42,7 @@ cached_services = []
 MENU_BUTTONS = [
     "🛍 Select Platform",
     "🔥 Trending Services",
+    "🏷 Sasti Services (Cheapest)",
     "💰 My Balance",
     "📜 My Orders",
     "💳 Add Funds (QR & UPI)",
@@ -285,6 +286,7 @@ def main_menu(user_id):
   markup.add(
       types.KeyboardButton("🛍 Select Platform"),
       types.KeyboardButton("🔥 Trending Services"),
+      types.KeyboardButton("🏷 Sasti Services (Cheapest)"),
       types.KeyboardButton("💰 My Balance"),
       types.KeyboardButton("📜 My Orders"),
       types.KeyboardButton("💳 Add Funds (QR & UPI)"),
@@ -929,6 +931,57 @@ def handle_menu_buttons(message):
         reply_markup=markup,
     )
 
+  elif text == "🏷 Sasti Services (Cheapest)":
+    services = get_cached_smm_services()
+    cheapest_matches = []
+
+    for s in services:
+      s_name = s.get("name", "")
+      s_cat = s.get("category", "")
+      selling_price = calculate_selling_price(
+          s.get("rate", 0), s_name, s_cat
+      )
+
+      s_copy = dict(s)
+      s_copy["calculated_price"] = selling_price
+      cheapest_matches.append(s_copy)
+
+    if not cheapest_matches:
+      bot.reply_to(
+          message, "❌ Filhal koi sasti services available nahi hain."
+      )
+      return
+
+    # Price ke hisaab se lowest (sasti) se highest sort karke top 10 lenge
+    cheapest_matches = sorted(
+        cheapest_matches, key=lambda x: x["calculated_price"]
+    )
+    top_cheapest = cheapest_matches[:10]
+
+    list_text = "🏷 *TOP 10 CHEAPEST SERVICES* 🏷\n\n```text\n"
+    markup = types.InlineKeyboardMarkup()
+
+    for idx, s in enumerate(top_cheapest, start=1):
+      s_name = s.get("name", "")
+      selling_price = s.get("calculated_price", 0.0)
+      service_id = str(s.get("service"))
+
+      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
+      markup.add(
+          types.InlineKeyboardButton(
+              f"🛒 #{idx} (ID: {service_id} - ₹{selling_price})",
+              callback_data=f"srv_{service_id}",
+          )
+      )
+
+    list_text += "```\n👇 *Service select karne ke liye button dabayein:*"
+    bot.send_message(
+        message.chat.id,
+        list_text,
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
+
   elif text == "💰 My Balance":
     bal_row = get_user(user_id)
     if bal_row:
@@ -1533,7 +1586,7 @@ def process_order_link(message):
   msg = bot.send_message(
       message.chat.id,
       "📊 **Quantity kitni chahiye?** (Number me likhein, jaise: 1000)",
-      parse_mode="Markdown",
+      parse_Mode="Markdown",
   )
   bot.register_next_step_handler(msg, process_order_quantity)
 
