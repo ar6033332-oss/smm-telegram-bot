@@ -4,7 +4,7 @@ import os
 import random
 import threading
 import time
-from flask import Flask, abort, jsonify, request
+from flask import Flask, abort, request
 import psycopg2
 import requests
 import telebot
@@ -15,14 +15,14 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SMM_API_KEY = os.environ.get("SMM_API_KEY")
 
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable is not set!")
+  raise ValueError("BOT_TOKEN environment variable is not set!")
 
 RENDER_URL = os.environ.get(
     "RENDER_URL", "https://smm-telegram-bot-w9s6.onrender.com"
 )
 RENDER_URL = RENDER_URL.strip().rstrip("/")
 if not RENDER_URL.startswith("http"):
-    RENDER_URL = f"https://{RENDER_URL}"
+  RENDER_URL = f"https://{RENDER_URL}"
 
 SMM_API_URL = "https://xmediasmm.in/api/v2"
 
@@ -59,54 +59,64 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
 def get_db_connection():
-    if DATABASE_URL:
-        return psycopg2.connect(DATABASE_URL)
-    else:
-        raise ValueError("DATABASE_URL environment variable is not set!")
+  if DATABASE_URL:
+    return psycopg2.connect(DATABASE_URL)
+  else:
+    raise ValueError("DATABASE_URL environment variable is not set!")
 
 
 def init_db():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, balance REAL DEFAULT 0.0)"
-        )
-        cursor.execute(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT 0"
-        )
-        cursor.execute(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0"
-        )
-        cursor.execute(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_claimed_trial BOOLEAN DEFAULT FALSE"
-        )
-        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key TEXT")
+  try:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, balance"
+        " REAL DEFAULT 0.0)"
+    )
+    cursor.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT"
+        " 0"
+    )
+    cursor.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0"
+    )
+    cursor.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_claimed_trial BOOLEAN"
+        " DEFAULT FALSE"
+    )
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key TEXT")
 
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value REAL)"
-        )
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER, cost REAL, date_time TEXT)"
-        )
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS pending_funds (user_id BIGINT PRIMARY KEY, amount REAL, time TIMESTAMP)"
-        )
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS refills (refill_id SERIAL PRIMARY KEY, order_id TEXT, user_id BIGINT, status TEXT DEFAULT 'Pending', requested_at TIMESTAMP DEFAULT NOW())"
-        )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value REAL)"
+    )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, order_id"
+        " TEXT, user_id BIGINT, service_name TEXT, link TEXT, quantity INTEGER,"
+        " cost REAL, date_time TEXT)"
+    )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS pending_funds (user_id BIGINT PRIMARY KEY,"
+        " amount REAL, time TIMESTAMP)"
+    )
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS refills (refill_id SERIAL PRIMARY KEY,"
+        " order_id TEXT, user_id BIGINT, status TEXT DEFAULT 'Pending',"
+        " requested_at TIMESTAMP DEFAULT NOW())"
+    )
 
-        cursor.execute(
-            "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON CONFLICT (key) DO NOTHING"
-        )
-        cursor.execute(
-            "INSERT INTO settings (key, value) VALUES ('instagram_views_margin', 60.0) ON CONFLICT (key) DO NOTHING"
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        print("Database Init Error:", e)
+    cursor.execute(
+        "INSERT INTO settings (key, value) VALUES ('profit_margin', 40.0) ON"
+        " CONFLICT (key) DO NOTHING"
+    )
+    cursor.execute(
+        "INSERT INTO settings (key, value) VALUES ('instagram_views_margin',"
+        " 60.0) ON CONFLICT (key) DO NOTHING"
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+  except Exception as e:
+    print("Database Init Error:", e)
 
 
 init_db()
@@ -116,967 +126,964 @@ DATA_FILE = "bot_stats.json"
 
 
 def get_updated_count():
-    try:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "r") as f:
-                data = json.load(f)
-        else:
-            data = {"count": 70000, "last_updated": str(datetime.now().date())}
+  try:
+    if os.path.exists(DATA_FILE):
+      with open(DATA_FILE, "r") as f:
+        data = json.load(f)
+    else:
+      data = {"count": 70000, "last_updated": str(datetime.now().date())}
 
-        today_str = str(datetime.now().date())
+    today_str = str(datetime.now().date())
 
-        if data.get("last_updated") != today_str:
-            increment = random.randint(300, 700)
-            data["count"] += increment
-            data["last_updated"] = today_str
+    if data.get("last_updated") != today_str:
+      increment = random.randint(300, 700)
+      data["count"] += increment
+      data["last_updated"] = today_str
 
-            with open(DATA_FILE, "w") as f:
-                json.dump(data, f)
+      with open(DATA_FILE, "w") as f:
+        json.dump(data, f)
 
-        return data.get("count", 70000)
-    except Exception as e:
-        print("Stats error:", e)
-        return 70000
+    return data.get("count", 70000)
+  except Exception as e:
+    print("Stats error:", e)
+    return 70000
 
 
 # ==================== FAST BACKGROUND SERVICE FETCHER ====================
 def fetch_services_background():
-    global cached_services
-    while True:
-        try:
-            response = requests.post(
-                SMM_API_URL,
-                data={"key": SMM_API_KEY, "action": "services"},
-                timeout=10,
-            )
-            if response.status_code == 200:
-                res_data = response.json()
-                if isinstance(res_data, list) and len(res_data) > 0:
-                    cached_services = res_data
-        except Exception as e:
-            print("Background fetch error:", e)
-        time.sleep(120)
+  global cached_services
+  while True:
+    try:
+      response = requests.post(
+          SMM_API_URL,
+          data={"key": SMM_API_KEY, "action": "services"},
+          timeout=10,
+      )
+      if response.status_code == 200:
+        res_data = response.json()
+        if isinstance(res_data, list) and len(res_data) > 0:
+          cached_services = res_data
+    except Exception as e:
+      print("Background fetch error:", e)
+    time.sleep(120)
 
 
 def get_cached_smm_services():
-    global cached_services
-    if not cached_services:
-        try:
-            response = requests.post(
-                SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=4
-            )
-            if response.status_code == 200:
-                res_data = response.json()
-                if isinstance(res_data, list):
-                    cached_services = res_data
-        except:
-            pass
-    return cached_services
+  global cached_services
+  if not cached_services:
+    try:
+      response = requests.post(
+          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=4
+      )
+      if response.status_code == 200:
+        res_data = response.json()
+        if isinstance(res_data, list):
+          cached_services = res_data
+    except:
+      pass
+  return cached_services
 
 
 def get_user(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT balance, points, api_key FROM users WHERE user_id = %s",
-        (user_id,),
-    )
-    row = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return row
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT balance, points, api_key FROM users WHERE user_id = %s",
+      (user_id,),
+  )
+  row = cursor.fetchone()
+  cursor.close()
+  conn.close()
+  return row
 
 
 def register_user(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO users (user_id, balance, referred_by, points, has_claimed_trial) VALUES (%s, 0.0, 0, 0, FALSE) ON CONFLICT (user_id) DO NOTHING",
-        (user_id,),
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "INSERT INTO users (user_id, balance, referred_by, points,"
+      " has_claimed_trial) VALUES (%s, 0.0, 0, 0, FALSE) ON CONFLICT (user_id)"
+      " DO NOTHING",
+      (user_id,),
+  )
+  conn.commit()
+  cursor.close()
+  conn.close()
 
 
 def update_balance(user_id, amount):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE users SET balance = balance + %s WHERE user_id = %s",
-        (amount, user_id),
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "UPDATE users SET balance = balance + %s WHERE user_id = %s",
+      (amount, user_id),
+  )
+  conn.commit()
+  cursor.close()
+  conn.close()
 
 
 def get_profit_margin():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = 'profit_margin'")
-    row = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return row[0] if row else 40.0
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT value FROM settings WHERE key = 'profit_margin'")
+  row = cursor.fetchone()
+  cursor.close()
+  conn.close()
+  return row[0] if row else 40.0
 
 
 def get_instagram_views_margin():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT value FROM settings WHERE key = 'instagram_views_margin'"
-    )
-    row = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return row[0] if row else 60.0
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT value FROM settings WHERE key = 'instagram_views_margin'"
+  )
+  row = cursor.fetchone()
+  cursor.close()
+  conn.close()
+  return row[0] if row else 60.0
 
 
 def is_instagram_views_service(service_name, category_name):
-    name = (service_name or "").lower()
-    cat = (category_name or "").lower()
-    if ("instagram" in cat or "ig" in cat or "instagram" in name or "ig" in name) and (
-        "view" in name or "view" in cat
-    ):
-        return True
-    return False
+  name = (service_name or "").lower()
+  cat = (category_name or "").lower()
+  if (
+      "instagram" in cat
+      or "ig" in cat
+      or "instagram" in name
+      or "ig" in name
+  ) and ("view" in name or "view" in cat):
+    return True
+  return False
 
 
 def calculate_selling_price(wholesale_rate, service_name="", category_name=""):
-    try:
-        wholesale_rate = float(wholesale_rate)
-    except:
-        wholesale_rate = 0.0
+  try:
+    wholesale_rate = float(wholesale_rate)
+  except:
+    wholesale_rate = 0.0
 
-    if is_instagram_views_service(service_name, category_name):
-        margin_percent = get_instagram_views_margin()
-    else:
-        margin_percent = get_profit_margin()
+  if is_instagram_views_service(service_name, category_name):
+    margin_percent = get_instagram_views_margin()
+  else:
+    margin_percent = get_profit_margin()
 
-    return round(wholesale_rate + (wholesale_rate * (margin_percent / 100.0)), 2)
+  return round(
+      wholesale_rate + (wholesale_rate * (margin_percent / 100.0)), 2
+  )
 
 
 def clear_user_state(user_id):
-    if user_id in user_order_state:
-        del user_order_state[user_id]
-
-
-def notify_admin_new_order(
-    user_id,
-    order_id,
-    service_name,
-    link,
-    quantity,
-    cost,
-    new_balance,
-    user_name="N/A",
-    user_username="N/A",
-):
-    try:
-        admin_msg = (
-            f"🚨 **NEW ORDER PLACED!** 🚨\n\n"
-            f"👤 **User:** {user_name}\n"
-            f"🆔 **User ID:** `{user_id}`\n"
-            f"🔗 **Username:** @{user_username}\n\n"
-            f"🛒 **Order Details:**\n"
-            f"• **Order ID:** `{order_id}`\n"
-            f"• **Service:** `{service_name}`\n"
-            f"• **Quantity:** `{quantity}`\n"
-            f"• **Link:** `{link}`\n\n"
-            f"💰 **Cost:** `₹{cost}`\n"
-            f"📉 **Remaining Balance:** `₹{new_balance:.2f}`"
-        )
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton(
-                "🔍 Check Status", callback_data=f"chkstatus_{order_id}"
-            )
-        )
-        bot.send_message(
-            ADMIN_ID, admin_msg, parse_mode="Markdown", reply_markup=markup
-        )
-    except Exception as e:
-        print(f"Failed to notify admin: {e}")
+  if user_id in user_order_state:
+    del user_order_state[user_id]
 
 
 # ==================== KEYBOARDS ====================
 def main_menu(user_id):
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    markup.add(
-        types.KeyboardButton("🛍 Select Platform"),
-        types.KeyboardButton("🔥 Trending Services"),
-        types.KeyboardButton("💰 My Balance"),
-        types.KeyboardButton("📜 My Orders"),
-        types.KeyboardButton("💳 Add Funds (QR & UPI)"),
-        types.KeyboardButton("🎁 Refer & Earn"),
-        types.KeyboardButton("🎁 Claim Free Trial"),
-        types.KeyboardButton("♻️ Request Refill"),
-        types.KeyboardButton("🤖 AI Caption Generator"),
-        types.KeyboardButton("🔑 Reseller API"),
-        types.KeyboardButton("📞 Support"),
-    )
-    if user_id == ADMIN_ID:
-        markup.add(types.KeyboardButton("👑 View All Users"))
-    return markup
+  markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+  markup.add(
+      types.KeyboardButton("🛍 Select Platform"),
+      types.KeyboardButton("🔥 Trending Services"),
+      types.KeyboardButton("💰 My Balance"),
+      types.KeyboardButton("📜 My Orders"),
+      types.KeyboardButton("💳 Add Funds (QR & UPI)"),
+      types.KeyboardButton("🎁 Refer & Earn"),
+      types.KeyboardButton("🎁 Claim Free Trial"),
+      types.KeyboardButton("♻️ Request Refill"),
+      types.KeyboardButton("🤖 AI Caption Generator"),
+      types.KeyboardButton("🔑 Reseller API"),
+      types.KeyboardButton("📞 Support"),
+  )
+  if user_id == ADMIN_ID:
+    markup.add(types.KeyboardButton("👑 View All Users"))
+  return markup
 
 
 def platforms_inline_menu():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton(
-            "👑 IG Followers Only", callback_data="plat_ig_followers_0"
-        )
-    )
-    markup.add(
-        types.InlineKeyboardButton(
-            "📸 Instagram All", callback_data="plat_instagram_0"
-        ),
-        types.InlineKeyboardButton("✈️ Telegram", callback_data="plat_telegram_0"),
-        types.InlineKeyboardButton("▶️ YouTube", callback_data="plat_youtube_0"),
-        types.InlineKeyboardButton("📘 Facebook", callback_data="plat_facebook_0"),
-        types.InlineKeyboardButton(
-            "🐦 Twitter (X)", callback_data="plat_twitter_0"
-        ),
-        types.InlineKeyboardButton("💬 WhatsApp", callback_data="plat_whatsapp_0"),
-    )
-    return markup
+  markup = types.InlineKeyboardMarkup(row_width=2)
+  markup.add(
+      types.InlineKeyboardButton(
+          "👑 IG Followers Only", callback_data="plat_ig_followers_0"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "📸 Instagram All", callback_data="plat_instagram_0"
+      ),
+      types.InlineKeyboardButton("✈️ Telegram", callback_data="plat_telegram_0"),
+      types.InlineKeyboardButton("▶️ YouTube", callback_data="plat_youtube_0"),
+      types.InlineKeyboardButton("📘 Facebook", callback_data="plat_facebook_0"),
+      types.InlineKeyboardButton(
+          "🐦 Twitter (X)", callback_data="plat_twitter_0"
+      ),
+      types.InlineKeyboardButton("💬 WhatsApp", callback_data="plat_whatsapp_0"),
+  )
+  return markup
 
 
 # ==================== HANDLERS ====================
 @bot.message_handler(commands=["start"])
 def start_handler(message):
+  user_id = message.from_user.id
+  clear_user_state(user_id)
+  register_user(user_id)
+
+  text_parts = message.text.split()
+  if len(text_parts) > 1 and text_parts[1].startswith("ref_"):
     try:
-        user_id = message.from_user.id
-        clear_user_state(user_id)
-        register_user(user_id)
-
-        text_parts = message.text.split()
-        if len(text_parts) > 1 and text_parts[1].startswith("ref_"):
-            try:
-                referrer_id = int(text_parts[1].replace("ref_", ""))
-                if referrer_id != user_id:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT referred_by FROM users WHERE user_id = %s", (user_id,)
-                    )
-                    row = cursor.fetchone()
-                    if row and row[0] == 0:
-                        cursor.execute(
-                            "UPDATE users SET referred_by = %s WHERE user_id = %s",
-                            (referrer_id, user_id),
-                        )
-                        cursor.execute(
-                            "SELECT points, balance FROM users WHERE user_id = %s",
-                            (referrer_id,),
-                        )
-                        ref_row = cursor.fetchone()
-                        if ref_row:
-                            earned_points = random.randint(30, 70)
-                            new_points = ref_row[0] + earned_points
-                            new_balance = ref_row[1]
-
-                            if new_points >= 100:
-                                extra_rupees = (new_points // 100) * 1.5
-                                new_balance += extra_rupees
-                                new_points = new_points % 100
-
-                            cursor.execute(
-                                "UPDATE users SET points = %s, balance = %s WHERE user_id = %s",
-                                (new_points, new_balance, referrer_id),
-                            )
-                            conn.commit()
-
-                            try:
-                                bot.send_message(
-                                    referrer_id,
-                                    f"🎉 *New Referral!* Aapki link se ek naye user ne join kiya hai, aur aapko mile hain **{earned_points} points**!",
-                                    parse_mode="Markdown",
-                                )
-                            except:
-                                pass
-                    cursor.close()
-                    conn.close()
-            except Exception as e:
-                print("Referral error:", e)
-
-        total_orders = get_updated_count()
-        first_name = message.from_user.first_name or "User"
-
-        bot.send_message(
-            message.chat.id,
-            f"✨ **Namaste {first_name}!** ✨\n\n"
-            f"🚀 Total Successful Orders: **{total_orders:,}+**\n\n"
-            "Welcome to Social Media Services Bot!",
-            parse_mode="Markdown",
-            reply_markup=main_menu(user_id),
+      referrer_id = int(text_parts[1].replace("ref_", ""))
+      if referrer_id != user_id:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT referred_by FROM users WHERE user_id = %s", (user_id,)
         )
+        row = cursor.fetchone()
+        if row and row[0] == 0:
+          cursor.execute(
+              "UPDATE users SET referred_by = %s WHERE user_id = %s",
+              (referrer_id, user_id),
+          )
+          cursor.execute(
+              "SELECT points, balance FROM users WHERE user_id = %s",
+              (referrer_id,),
+          )
+          ref_row = cursor.fetchone()
+          if ref_row:
+            earned_points = random.randint(30, 70)
+            new_points = ref_row[0] + earned_points
+            new_balance = ref_row[1]
+
+            if new_points >= 100:
+              extra_rupees = (new_points // 100) * 1.5
+              new_balance += extra_rupees
+              new_points = new_points % 100
+
+            cursor.execute(
+                "UPDATE users SET points = %s, balance = %s WHERE user_id = %s",
+                (new_points, new_balance, referrer_id),
+            )
+            conn.commit()
+
+            try:
+              bot.send_message(
+                  referrer_id,
+                  f"🎉 *New Referral!* Aapki link se ek naye user ne join kiya"
+                  f" hai, aur aapko mile hain **{earned_points} points**!",
+                  parse_mode="Markdown",
+              )
+            except:
+              pass
+        cursor.close()
+        conn.close()
     except Exception as e:
-        print("Start Handler Error:", e)
+      print("Referral error:", e)
+
+  total_orders = get_updated_count()
+
+  bot.send_message(
+      message.chat.id,
+      f"✨ **Namaste {message.from_user.first_name}!** ✨\n\n"
+      f"🚀 Total Successful Orders: **{total_orders:,}+**\n\n"
+      "Welcome to Social Media Services Bot!",
+      parse_mode="Markdown",
+      reply_markup=main_menu(user_id),
+  )
 
 
+# ==================== ADMIN USERS PANEL BUTTON HANDLER ====================
 @bot.message_handler(func=lambda message: message.text == "👑 View All Users")
 def handle_admin_users_button(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "❌ Yeh feature sirf Admin ke liye hai!")
-        return
+  if message.from_user.id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh feature sirf Admin ke liye hai!")
+    return
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total_users = cursor.fetchone()[0]
-    cursor.close()
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT COUNT(*) FROM users")
+  total_users = cursor.fetchone()[0]
+  cursor.close()
 
-    if total_users == 0:
-        conn.close()
-        bot.reply_to(message, "⚠️ Database mein koi user nahi hai!")
-        return
-
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id, balance FROM users ORDER BY user_id DESC LIMIT 20")
-    all_users = cursor.fetchall()
-    cursor.close()
+  if total_users == 0:
     conn.close()
+    bot.reply_to(message, "⚠️ Database mein koi user nahi hai!")
+    return
 
-    inline_markup = types.InlineKeyboardMarkup()
-    for user in all_users:
-        u_id = user[0]
-        u_bal = user[1]
-        btn_text = f"👤 ID: {u_id} | ₹{u_bal:.2f}"
-        inline_markup.add(
-            types.InlineKeyboardButton(
-                text=btn_text, callback_data=f"userdetail_{u_id}"
-            )
+  cursor = conn.cursor()
+  cursor.execute("SELECT user_id, balance FROM users ORDER BY user_id DESC LIMIT 20")
+  all_users = cursor.fetchall()
+  cursor.close()
+  conn.close()
+
+  inline_markup = types.InlineKeyboardMarkup()
+  for user in all_users:
+    u_id = user[0]
+    u_bal = user[1]
+    btn_text = f"👤 ID: {u_id} | ₹{u_bal:.2f}"
+    inline_markup.add(
+        types.InlineKeyboardButton(
+            text=btn_text, callback_data=f"userdetail_{u_id}"
         )
-
-    response_text = (
-        f"📊 **ADMIN PANEL - USERS LIST**\n\n"
-        f"👥 **Total Registered Users:** `{total_users}`\n\n"
-        f"Kisi user ki detail dekhne ke liye uske button par click karein:"
     )
 
-    bot.send_message(
-        message.chat.id, response_text, parse_mode="Markdown", reply_markup=inline_markup
-    )
+  response_text = (
+      f"📊 **ADMIN PANEL - USERS LIST**\n\n"
+      f"👥 **Total Registered Users:** `{total_users}`\n\n"
+      f"Kisi user ki detail dekhne ke liye uske button par click karein:"
+  )
+
+  bot.send_message(
+      message.chat.id, response_text, parse_mode="Markdown", reply_markup=inline_markup
+  )
 
 
 @bot.message_handler(commands=["addfunds"])
 def addfunds_command(message):
-    ask_amount_logic(
-        message.chat.id, message.from_user.id, message.from_user.first_name
-    )
+  ask_amount_logic(
+      message.chat.id, message.from_user.id, message.from_user.first_name
+  )
 
 
 @bot.message_handler(commands=["freetrial"])
 def freetrial_command(message):
-    user_id = message.from_user.id
-    register_user(user_id)
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT has_claimed_trial FROM users WHERE user_id = %s", (user_id,)
-        )
-        row = cursor.fetchone()
-        has_claimed = row[0] if row else False
+  user_id = message.from_user.id
+  register_user(user_id)
+  try:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT has_claimed_trial FROM users WHERE user_id = %s", (user_id,)
+    )
+    row = cursor.fetchone()
+    has_claimed = row[0] if row else False
 
-        if has_claimed:
-            bot.reply_to(
-                message,
-                "❌ Aap pehle hi apna **Free Trial** claim kar chuke hain! Ab aap `/addfunds` se balance add kar sakte hain.",
-                parse_mode="Markdown",
-            )
-        else:
-            free_bonus = round(random.uniform(0.58, 1.50), 2)
-            cursor.execute(
-                "UPDATE users SET balance = balance + %s, has_claimed_trial = TRUE WHERE user_id = %s",
-                (free_bonus, user_id),
-            )
-            conn.commit()
-            bot.reply_to(
-                message,
-                f"🎉 **Congratulations! Aapka Free Trial successfully claim ho gaya hai.**\n\n💰 Aapke wallet mein `₹{free_bonus}` ka bonus add kar diya gaya hai jisse aap services test kar sakte hain!",
-                parse_mode="Markdown",
-            )
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        bot.reply_to(message, f"⚠ Error: {str(e)}")
+    if has_claimed:
+      bot.reply_to(
+          message,
+          "❌ Aap pehle hi apna **Free Trial** claim kar chuke hain! Ab aap"
+          " `/addfunds` se balance add kar sakte hain.",
+          parse_mode="Markdown",
+      )
+    else:
+      free_bonus = round(random.uniform(0.58, 1.50), 2)
+      cursor.execute(
+          "UPDATE users SET balance = balance + %s, has_claimed_trial = TRUE"
+          " WHERE user_id = %s",
+          (free_bonus, user_id),
+      )
+      conn.commit()
+      bot.reply_to(
+          message,
+          "🎉 **Congratulations! Aapka Free Trial successfully claim ho gaya"
+          f" hai.**\n\n💰 Aapke wallet mein `₹{free_bonus}` ka bonus add kar"
+          " diya gaya hai jisse aap services test kar sakte hain!",
+          parse_mode="Markdown",
+      )
+    cursor.close()
+    conn.close()
+  except Exception as e:
+    bot.reply_to(message, f"⚠ Error: {str(e)}")
 
 
 @bot.message_handler(commands=["setmargin"])
 def set_margin_command(message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        try:
-            parts = message.text.split()
-            if len(parts) < 2:
-                bot.reply_to(
-                    message,
-                    "❌ Sahi format use karein: `/setmargin 35`",
-                    parse_mode="Markdown",
-                )
-                return
-            new_margin = float(parts[1])
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE settings SET value = %s WHERE key = 'profit_margin'",
-                (new_margin,),
-            )
-            conn.commit()
-            cursor.close()
-            conn.close()
-            bot.reply_to(
-                message,
-                f"✅ General profit margin successfully updated to **{new_margin}%**",
-                parse_mode="Markdown",
-            )
-        except ValueError:
-            bot.reply_to(
-                message,
-                "❌ Kripya valid number dalein, jaise: `/setmargin 30`",
-                parse_mode="Markdown",
-            )
-    else:
-        bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
+  user_id = message.from_user.id
+  if user_id == ADMIN_ID:
+    try:
+      parts = message.text.split()
+      if len(parts) < 2:
+        bot.reply_to(
+            message,
+            "❌ Sahi format use karein: `/setmargin 35`",
+            parse_mode="Markdown",
+        )
+        return
+      new_margin = float(parts[1])
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "UPDATE settings SET value = %s WHERE key = 'profit_margin'",
+          (new_margin,),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
+      bot.reply_to(
+          message,
+          f"✅ General profit margin successfully updated to **{new_margin}%**",
+          parse_mode="Markdown",
+      )
+    except ValueError:
+      bot.reply_to(
+          message,
+          "❌ Kripya valid number dalein, jaise: `/setmargin 30`",
+          parse_mode="Markdown",
+      )
+  else:
+    bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
 
 
 @bot.message_handler(commands=["setigmargin"])
 def set_ig_margin_command(message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        try:
-            parts = message.text.split()
-            if len(parts) < 2:
-                bot.reply_to(
-                    message,
-                    "❌ Sahi format use karein: `/setigmargin 60`",
-                    parse_mode="Markdown",
-                )
-                return
-            new_margin = float(parts[1])
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE settings SET value = %s WHERE key = 'instagram_views_margin'",
-                (new_margin,),
-            )
-            conn.commit()
-            cursor.close()
-            conn.close()
-            bot.reply_to(
-                message,
-                f"✅ Instagram Views profit margin successfully updated to **{new_margin}%**",
-                parse_mode="Markdown",
-            )
-        except ValueError:
-            bot.reply_to(
-                message,
-                "❌ Kripya valid number dalein, jaise: `/setigmargin 60`",
-                parse_mode="Markdown",
-            )
-    else:
-        bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
+  user_id = message.from_user.id
+  if user_id == ADMIN_ID:
+    try:
+      parts = message.text.split()
+      if len(parts) < 2:
+        bot.reply_to(
+            message,
+            "❌ Sahi format use karein: `/setigmargin 60`",
+            parse_mode="Markdown",
+        )
+        return
+      new_margin = float(parts[1])
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "UPDATE settings SET value = %s WHERE key = 'instagram_views_margin'",
+          (new_margin,),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
+      bot.reply_to(
+          message,
+          f"✅ Instagram Views profit margin successfully updated to"
+          f" **{new_margin}%**",
+          parse_mode="Markdown",
+      )
+    except ValueError:
+      bot.reply_to(
+          message,
+          "❌ Kripya valid number dalein, jaise: `/setigmargin 60`",
+          parse_mode="Markdown",
+      )
+  else:
+    bot.reply_to(message, "❌ Yeh command sirf Admin use kar sakta hai.")
 
 
 @bot.message_handler(commands=["status"])
 def status_command(message):
-    parts = message.text.split()
-    if len(parts) < 2:
-        bot.reply_to(
-            message,
-            "❌ Sahi format use karein: `/status <Order_ID>`\nJaise: `/status 123456`",
-            parse_mode="Markdown",
-        )
-        return
+  parts = message.text.split()
+  if len(parts) < 2:
+    bot.reply_to(
+        message,
+        "❌ Sahi format use karein: `/status <Order_ID>`\nJaise: `/status"
+        " 123456`",
+        parse_mode="Markdown",
+    )
+    return
 
-    order_id = parts[1].strip()
-    user_id = message.from_user.id
-    check_and_send_status(message.chat.id, user_id, order_id, is_reply=True)
+  order_id = parts[1].strip()
+  user_id = message.from_user.id
+  check_and_send_status(message.chat.id, user_id, order_id, is_reply=True)
 
 
 def check_and_send_status(chat_id, user_id, order_id, is_reply=False):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT user_id, cost, service_name FROM orders WHERE order_id = %s",
-        (order_id,),
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT user_id, cost, service_name FROM orders WHERE order_id = %s",
+      (order_id,),
+  )
+  order_row = cursor.fetchone()
+  cursor.close()
+  conn.close()
+
+  if not order_row:
+    text = "❌ Yeh Order ID database mein nahi mili. Sahi Order ID enter karein."
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
+    else:
+      bot.send_message(chat_id, text, parse_mode="Markdown")
+    return
+
+  db_user_id, order_cost, service_name = order_row
+
+  if user_id != ADMIN_ID and user_id != db_user_id:
+    text = "❌ Aap sirf apne orders ka status check kar sakte hain."
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text)
+    else:
+      bot.send_message(chat_id, text)
+    return
+
+  try:
+    payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
+    response = requests.post(SMM_API_URL, data=payload, timeout=10)
+    res_data = response.json()
+
+    if "error" in res_data:
+      text = f"❌ **SMM Error:** `{res_data['error']}`"
+      if is_reply:
+        bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
+      else:
+        bot.send_message(chat_id, text, parse_mode="Markdown")
+      return
+
+    status = res_data.get("status", "Unknown")
+    remains = res_data.get("remains", "N/A")
+    start_count = res_data.get("start_count", "N/A")
+
+    status_msg = (
+        f"📊 **Order Status Details**\n\n"
+        f"🆔 **Order ID:** `{order_id}`\n"
+        f"📦 **Service:** `{service_name}`\n"
+        f"📌 **Status:** `{status}`\n"
+        f"📉 **Remains:** `{remains}`\n"
+        f"📈 **Start Count:** `{start_count}`"
     )
-    order_row = cursor.fetchone()
-    cursor.close()
-    conn.close()
 
-    if not order_row:
-        text = "❌ Yeh Order ID database mein nahi mili. Sahi Order ID enter karein."
-        if is_reply:
-            bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
-        else:
-            bot.send_message(chat_id, text, parse_mode="Markdown")
-        return
+    if status.lower() in ["canceled", "refunded"]:
+      update_balance(db_user_id, order_cost)
+      status_msg += (
+          f"\n\n💰 **Auto-Refunded:** `₹{order_cost}` aapke account mein wapas"
+          " jama kar diye gaye hain kyunki order cancel ho gaya tha."
+      )
 
-    db_user_id, order_cost, service_name = order_row
-
-    if user_id != ADMIN_ID and user_id != db_user_id:
-        text = "❌ Aap sirf apne orders ka status check kar sakte hain."
-        if is_reply:
-            bot.reply_to(bot.get_chat(chat_id), text)
-        else:
-            bot.send_message(chat_id, text)
-        return
-
-    try:
-        payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
-        response = requests.post(SMM_API_URL, data=payload, timeout=10)
-        res_data = response.json()
-
-        if "error" in res_data:
-            text = f"❌ **SMM Error:** `{res_data['error']}`"
-            if is_reply:
-                bot.reply_to(bot.get_chat(chat_id), text, parse_mode="Markdown")
-            else:
-                bot.send_message(chat_id, text, parse_mode="Markdown")
-            return
-
-        status = res_data.get("status", "Unknown")
-        remains = res_data.get("remains", "N/A")
-        start_count = res_data.get("start_count", "N/A")
-
-        status_msg = (
-            f"📊 **Order Status Details**\n\n"
-            f"🆔 **Order ID:** `{order_id}`\n"
-            f"📦 **Service:** `{service_name}`\n"
-            f"📌 **Status:** `{status}`\n"
-            f"📉 **Remains:** `{remains}`\n"
-            f"📈 **Start Count:** `{start_count}`"
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            "♻️ Request Refill", callback_data=f"refillreq_{order_id}"
         )
+    )
 
-        if status.lower() in ["canceled", "refunded"]:
-            update_balance(db_user_id, order_cost)
-            status_msg += f"\n\n💰 **Auto-Refunded:** `₹{order_cost}` aapke account mein wapas jama kar diye gaye hain kyunki order cancel ho gaya tha."
+    if is_reply:
+      bot.reply_to(
+          bot.get_chat(chat_id),
+          status_msg,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    else:
+      bot.send_message(
+          chat_id, status_msg, parse_mode="Markdown", reply_markup=markup
+      )
 
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton(
-                "♻️ Request Refill", callback_data=f"refillreq_{order_id}"
-            )
-        )
-
-        if is_reply:
-            bot.reply_to(
-                bot.get_chat(chat_id),
-                status_msg,
-                parse_mode="Markdown",
-                reply_markup=markup,
-            )
-        else:
-            bot.send_message(
-                chat_id, status_msg, parse_mode="Markdown", reply_markup=markup
-            )
-
-    except Exception as e:
-        text = f"❌ Status fetch karne mein error aayi: {str(e)}"
-        if is_reply:
-            bot.reply_to(bot.get_chat(chat_id), text)
-        else:
-            bot.send_message(chat_id, text)
+  except Exception as e:
+    text = f"❌ Status fetch karne mein error aayi: {str(e)}"
+    if is_reply:
+      bot.reply_to(bot.get_chat(chat_id), text)
+    else:
+      bot.send_message(chat_id, text)
 
 
 @bot.message_handler(commands=["broadcast"])
 def broadcast_command(message):
-    user_id = message.from_user.id
-    if user_id != ADMIN_ID:
-        bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
-        return
+  user_id = message.from_user.id
+  if user_id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
+    return
 
-    text_parts = message.text.split(maxsplit=1)
-    if len(text_parts) < 2:
-        bot.reply_to(
-            message,
-            "❌ Sahi format use karein:\n`/broadcast Aapka message yahan likhein`",
-            parse_mode="Markdown",
-        )
-        return
-
-    broadcast_text = text_parts[1]
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users")
-    all_users = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    success_count = 0
-    fail_count = 0
-
+  text_parts = message.text.split(maxsplit=1)
+  if len(text_parts) < 2:
     bot.reply_to(
         message,
-        f"📢 Broadcast shuru ho gaya hai... Total users: {len(all_users)}",
-    )
-
-    for row in all_users:
-        uid = row[0]
-        try:
-            bot.send_message(
-                uid,
-                f"📢 **Announcement:**\n\n{broadcast_text}",
-                parse_mode="Markdown",
-            )
-            success_count += 1
-            time.sleep(0.1)
-        except Exception:
-            fail_count += 1
-
-    bot.send_message(
-        message.chat.id,
-        f"✅ **Broadcast Completed!**\n\nSuccessful: `{success_count}`\nFailed (Blocked/Inactive): `{fail_count}`",
+        "❌ Sahi format use karein:\n`/broadcast Aapka message yahan likhein`",
         parse_mode="Markdown",
     )
+    return
+
+  broadcast_text = text_parts[1]
+
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT user_id FROM users")
+  all_users = cursor.fetchall()
+  cursor.close()
+  conn.close()
+
+  success_count = 0
+  fail_count = 0
+
+  bot.reply_to(
+      message,
+      f"📢 Broadcast shuru ho gaya hai... Total users: {len(all_users)}",
+  )
+
+  for row in all_users:
+    uid = row[0]
+    try:
+      bot.send_message(
+          uid,
+          f"📢 **Announcement:**\n\n{broadcast_text}",
+          parse_mode="Markdown",
+      )
+      success_count += 1
+      time.sleep(0.1)
+    except Exception:
+      fail_count += 1
+
+  bot.send_message(
+      message.chat.id,
+      f"✅ **Broadcast Completed!**\n\nSuccessful: `{success_count}`\nFailed"
+      f" (Blocked/Inactive): `{fail_count}`",
+      parse_mode="Markdown",
+  )
 
 
 @bot.message_handler(commands=["addbal"])
 def add_balance_admin(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
-        return
-    parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(
-            message,
-            "❌ Sahi format: `/addbal <User_ID> <Amount>`\nJaise: `/addbal 123456789 50`",
-            parse_mode="Markdown",
-        )
-        return
+  if message.from_user.id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
+    return
+  parts = message.text.split()
+  if len(parts) < 3:
+    bot.reply_to(
+        message,
+        "❌ Sahi format: `/addbal <User_ID> <Amount>`\nJaise: `/addbal"
+        " 123456789 50`",
+        parse_mode="Markdown",
+    )
+    return
+  try:
+    target_user_id = int(parts[1])
+    amount = float(parts[2])
+    register_user(target_user_id)
+    update_balance(target_user_id, amount)
+    bot.reply_to(
+        message,
+        f"✅ Success! User `{target_user_id}` ke account mein `₹{amount}` add"
+        " kar diye gaye hain.",
+        parse_mode="Markdown",
+    )
     try:
-        target_user_id = int(parts[1])
-        amount = float(parts[2])
-        register_user(target_user_id)
-        update_balance(target_user_id, amount)
-        bot.reply_to(
-            message,
-            f"✅ Success! User `{target_user_id}` ke account mein `₹{amount}` add kar diye gaye hain.",
-            parse_mode="Markdown",
-        )
-        try:
-            bot.send_message(
-                target_user_id,
-                f"💰 **Balance Updated:** Admin ne aapke wallet mein `₹{amount}` add kar diye hain!",
-                parse_mode="Markdown",
-            )
-        except:
-            pass
-    except ValueError:
-        bot.reply_to(
-            message,
-            "❌ Kripya valid User ID aur Amount dalein.",
-            parse_mode="Markdown",
-        )
+      bot.send_message(
+          target_user_id,
+          f"💰 **Balance Updated:** Admin ne aapke wallet mein `₹{amount}` add"
+          " kar diye hain!",
+          parse_mode="Markdown",
+      )
+    except:
+      pass
+  except ValueError:
+    bot.reply_to(
+        message,
+        "❌ Kripya valid User ID aur Amount dalein.",
+        parse_mode="Markdown",
+    )
 
 
 @bot.message_handler(commands=["cutbal"])
 def cut_balance_admin(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
-        return
-    parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(
-            message,
-            "❌ Sahi format: `/cutbal <User_ID> <Amount>`\nJaise: `/cutbal 123456789 50`",
-            parse_mode="Markdown",
-        )
-        return
+  if message.from_user.id != ADMIN_ID:
+    bot.reply_to(message, "❌ Yeh command sirf Admin ke liye hai.")
+    return
+  parts = message.text.split()
+  if len(parts) < 3:
+    bot.reply_to(
+        message,
+        "❌ Sahi format: `/cutbal <User_ID> <Amount>`\nJaise: `/cutbal"
+        " 123456789 50`",
+        parse_mode="Markdown",
+    )
+    return
+  try:
+    target_user_id = int(parts[1])
+    amount = float(parts[2])
+    update_balance(target_user_id, -amount)
+    bot.reply_to(
+        message,
+        f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat"
+        " liye gaye hain.",
+        parse_mode="Markdown",
+    )
     try:
-        target_user_id = int(parts[1])
-        amount = float(parts[2])
-        update_balance(target_user_id, -amount)
-        bot.reply_to(
-            message,
-            f"✅ Success! User `{target_user_id}` ke account se `₹{amount}` kaat liye gaye hain.",
-            parse_mode="Markdown",
-        )
-        try:
-            bot.send_message(
-                target_user_id,
-                f"⚠ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat liye hain.",
-                parse_mode="Markdown",
-            )
-        except:
-            pass
-    except ValueError:
-        bot.reply_to(
-            message,
-            "❌ Kripya valid User ID aur Amount dalein.",
-            parse_mode="Markdown",
-        )
+      bot.send_message(
+          target_user_id,
+          f"⚠ **Balance Deducted:** Admin ne aapke wallet se `₹{amount}` kaat"
+          " liye hain.",
+          parse_mode="Markdown",
+      )
+    except:
+      pass
+  except ValueError:
+    bot.reply_to(
+        message,
+        "❌ Kripya valid User ID aur Amount dalein.",
+        parse_mode="Markdown",
+    )
 
 
 def ask_amount_logic(chat_id, user_id, first_name):
-    msg = bot.send_message(
-        chat_id,
-        "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)",
-        parse_mode="Markdown",
-    )
-    bot.register_next_step_handler(msg, process_payment_amount)
+  msg = bot.send_message(
+      chat_id,
+      "💰 **Kitna amount add karna chahte hain?**\n(Minimum ₹10)",
+      parse_mode="Markdown",
+  )
+  bot.register_next_step_handler(msg, process_payment_amount)
 
 
 def process_payment_amount(message):
-    user_id = message.from_user.id
+  user_id = message.from_user.id
 
-    if message.text and any(btn in message.text for btn in MENU_BUTTONS):
-        clear_user_state(user_id)
-        handle_menu_buttons(message)
-        return
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
+    return
 
-    try:
-        amount_rs = float(message.text.strip())
-        if amount_rs < 10:
-            bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
-            ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
-            return
+  try:
+    amount_rs = float(message.text.strip())
+    if amount_rs < 10:
+      bot.reply_to(message, "❌ Minimum amount ₹10 hai.")
+      ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
+      return
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO pending_funds (user_id, amount, time) VALUES (%s, %s, NOW()) ON CONFLICT (user_id) DO UPDATE SET amount = EXCLUDED.amount, time = NOW()",
-            (user_id, amount_rs),
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO pending_funds (user_id, amount, time) VALUES (%s, %s,"
+        " NOW()) ON CONFLICT (user_id) DO UPDATE SET amount = EXCLUDED.amount,"
+        " time = NOW()",
+        (user_id, amount_rs),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-        bot.send_photo(
-            message.chat.id,
-            photo=QR_CODE_URL,
-            caption=(
-                "🛡 **SECURE ENCRYPTED UPI GATEWAY** 🛡\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "⚡ **Status:** Active & Instant Credit\n"
-                f"🆔 **UPI ID:** `{UPI_ID}`\n"
-                f"💰 **Payable Amount:** `₹{amount_rs}`\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🚨 **IMPORTANT INSTRUCTIONS:**\n"
-                f"1️⃣ Upar diye gaye QR ya UPI ID par **₹{amount_rs}** transfer karein.\n"
-                "2️⃣ Payment successful hone ke baad **UTR (Transaction ID)** ya **Screenshot** turant yahin bhej dein.\n\n"
-                "⏳ *Wallet mein balance verify hone par update kar diya jayega!*"
-            ),
-            parse_mode="Markdown",
-        )
-    except ValueError:
-        bot.reply_to(
-            message, "❌ Kripya sirf valid number likhein (jaise: 50 ya 100)."
-        )
-        ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
+    bot.send_photo(
+        message.chat.id,
+        photo=QR_CODE_URL,
+        caption=(
+            "🛡 **SECURE ENCRYPTED UPI GATEWAY** 🛡\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚡ **Status:** Active & Instant Credit\n"
+            f"🆔 **UPI ID:** `{UPI_ID}`\n"
+            f"💰 **Payable Amount:** `₹{amount_rs}`\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🚨 **IMPORTANT INSTRUCTIONS:**\n"
+            f"1️⃣ Upar diye gaye QR ya UPI ID par **₹{amount_rs}** transfer karein.\n"
+            "2️⃣ Payment successful hone ke baad **UTR (Transaction ID)** ya **Screenshot** turant yahin bhej dein.\n\n"
+            "⏳ *Wallet mein balance verify hone par update kar diya jayega!*"
+        ),
+        parse_mode="Markdown",
+    )
+  except ValueError:
+    bot.reply_to(
+        message, "❌ Kripya sirf valid number likhein (jaise: 50 ya 100)."
+    )
+    ask_amount_logic(message.chat.id, user_id, message.from_user.first_name)
 
 
 # ==================== MENU BUTTONS HANDLER ====================
 @bot.message_handler(func=lambda message: message.text in MENU_BUTTONS)
 def handle_menu_buttons(message):
-    user_id = message.from_user.id
-    text = message.text
-    clear_user_state(user_id)
-    register_user(user_id)
+  user_id = message.from_user.id
+  text = message.text
+  clear_user_state(user_id)
+  register_user(user_id)
 
-    if text == "🛍 Select Platform":
-        bot.send_message(
-            message.chat.id,
-            "👇 **Select Platform or Category:**",
-            parse_mode="Markdown",
-            reply_markup=platforms_inline_menu(),
-        )
-    elif text == "🔥 Trending Services":
-        services = get_cached_smm_services()
-        trending_matches = []
+  if text == "🛍 Select Platform":
+    bot.send_message(
+        message.chat.id,
+        "👇 **Select Platform or Category:**",
+        parse_mode="Markdown",
+        reply_markup=platforms_inline_menu(),
+    )
+  elif text == "🔥 Trending Services":
+    services = get_cached_smm_services()
+    trending_matches = []
+    for s in services:
+      name = s.get("name", "").lower()
+      cat = s.get("category", "").lower()
+      if (
+          "follower" in name
+          or "subscriber" in name
+          or "view" in name
+          or "like" in name
+      ):
+        trending_matches.append(s)
+        if len(trending_matches) >= 10:
+          break
 
-        for s in services:
-            s_name = s.get("name", "")
-            s_cat = s.get("category", "")
-            selling_price = calculate_selling_price(
-                s.get("rate", 0), s_name, s_cat
-            )
+    if not trending_matches:
+      bot.reply_to(
+          message, "❌ Filhal koi trending services available nahi hain."
+      )
+      return
 
-            s_copy = dict(s)
-            s_copy["calculated_price"] = selling_price
-            trending_matches.append(s_copy)
+    list_text = "🔥 *TOP TRENDING & BEST SERVICES* 🔥\n\n```text\n"
+    markup = types.InlineKeyboardMarkup()
 
-        if not trending_matches:
-            bot.reply_to(
-                message, "❌ Filhal koi trending services available nahi hain."
-            )
-            return
+    for idx, s in enumerate(trending_matches, start=1):
+      s_name = s.get("name", "")
+      s_cat = s.get("category", "")
+      selling_price = calculate_selling_price(
+          s.get("rate", 0), s_name, s_cat
+      )
+      service_id = str(s.get("service"))
 
-        # Srif sabse sasti (cheapest) services ko low-to-high sort karke top 10 lenge
-        trending_matches = sorted(
-            trending_matches, key=lambda x: x["calculated_price"]
-        )
-        top_cheapest_trending = trending_matches[:10]
+      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
+      markup.add(
+          types.InlineKeyboardButton(
+              f"🛒 #{idx} (ID: {service_id})", callback_data=f"srv_{service_id}"
+          )
+      )
 
-        list_text = "🔥 *TOP 10 CHEAPEST TRENDING SERVICES* 🔥\n\n```text\n"
-        markup = types.InlineKeyboardMarkup()
+    list_text += "```\n👇 *Service select karne ke liye button dabayein:*"
+    bot.send_message(
+        message.chat.id,
+        list_text,
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
 
-        for idx, s in enumerate(top_cheapest_trending, start=1):
-            s_name = s.get("name", "")
-            selling_price = s.get("calculated_price", 0.0)
-            service_id = str(s.get("service"))
-
-            list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
-            markup.add(
-                types.InlineKeyboardButton(
-                    f"🛒 #{idx} (ID: {service_id} - ₹{selling_price})",
-                    callback_data=f"srv_{service_id}",
-                )
-            )
-
-        list_text += "```\n👇 *Service select karne ke liye button dabayein:*"
-        bot.send_message(
-            message.chat.id,
-            list_text,
-            parse_mode="Markdown",
-            reply_markup=markup,
-        )
-
-    elif text == "💰 My Balance":
-        bal_row = get_user(user_id)
-        if bal_row:
-            bal = bal_row[0]
-            pts = bal_row[1]
-        else:
-            bal = 0.0
-            pts = 0
-        bot.reply_to(
-            message,
-            f"👤 **User ID:** `{user_id}`\n💰 **Balance:** ₹{bal:.2f}\n⭐ **Points:** {pts} pts (100 pts = ₹1.5)",
-            parse_mode="Markdown",
-        )
-    elif text == "📜 My Orders":
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT order_id, service_name, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC LIMIT 5",
-            (user_id,),
-        )
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        if not rows:
-            bot.reply_to(message, "📜 No orders found.")
-        else:
-            markup = types.InlineKeyboardMarkup()
-            for r in rows:
-                markup.add(
-                    types.InlineKeyboardButton(
-                        f"♻️ Refill ID: {r[0]}", callback_data=f"refillreq_{r[0]}"
-                    )
-                )
-            msg = "📜 **Recent Orders & Refill Options:**\n\n" + "".join([
-                f"🆔 `{r[0]}` | {r[1]} | Qty: {r[2]} | ₹{r[3]}\n" for r in rows
-            ])
-            bot.reply_to(message, msg, parse_mode="Markdown", reply_markup=markup)
-    elif text == "💳 Add Funds (QR & UPI)":
-        ask_amount_logic(
-            message.chat.id, message.from_user.id, message.from_user.first_name
-        )
-    elif text == "🎁 Refer & Earn":
-        bot_info = bot.get_me()
-        ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
-
-        ref_text = (
-            f"🎁 **Refer & Earn Program** 🎁\n\n"
-            f"Apne dosto ko invite karein aur random **30 se 70 points** tak jeetein!\n"
-            f"Jaise hi aapke **100 points** honge, woh automatically **₹1.5** mein convert ho jayenge.\n\n"
-            f"🔗 **Aapki Unique Referral Link:**\n`{ref_link}`\n\n"
-            f"👇 Is link ko copy karke apne dosto ke sath share karein!"
-        )
-        bot.reply_to(message, ref_text, parse_mode="Markdown")
-    elif text == "🎁 Claim Free Trial":
-        freetrial_command(message)
-    elif text == "♻️ Request Refill":
-        bot.reply_to(
-            message,
-            "♻ **Auto-Refill Instructions:**\nApne `/myorders` ya status check section mein jayenge toh wahan har order ke sath **'Request Refill'** ka button mil jayega, wahan se click karein!",
-            parse_mode="Markdown",
-        )
-    elif text == "🤖 AI Caption Generator":
-        user_order_state[user_id] = {"mode": "ai_caption"}
-        msg = bot.send_message(
-            message.chat.id,
-            "🤖 **AI Caption Generator**\nApne post ka topic ya niche likhein (jaise: gym motivation ya travel vlog):",
-            parse_mode="Markdown",
-        )
-        bot.register_next_step_handler(msg, process_ai_caption)
-    elif text == "🔑 Reseller API":
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT api_key FROM users WHERE user_id = %s", (user_id,))
-        row = cursor.fetchone()
-        apikey = row[0] if row else None
-
-        if not apikey:
-            import uuid
-
-            apikey = str(uuid.uuid4()).replace("-", "")
-            cursor.execute(
-                "UPDATE users SET api_key = %s WHERE user_id = %s", (apikey, user_id)
-            )
-            conn.commit()
-        cursor.close()
-        conn.close()
-
-        api_doc = (
-            f"🔑 **Smart Reseller API Panel**\n\n"
-            f"Aap apne SMM panel ya doosre bots ko is bot ke sath connect kar sakte hain:\n\n"
-            f"🌐 **API URL:** `{RENDER_URL}/api/v2`\n"
-            f"🔑 **Your API Key:** `{apikey}`\n\n"
-            "Supported actions: `services`, `add`, `status`"
-        )
-        bot.reply_to(message, api_doc, parse_mode="Markdown")
-    elif text == "📞 Support":
-        bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
-
-
-def process_ai_caption(message):
-    user_id = message.from_user.id
-    if message.text and any(btn in message.text for btn in MENU_BUTTONS):
-        clear_user_state(user_id)
-        handle_menu_buttons(message)
-        return
-
-    topic = message.text.strip()
-    captions = [
-        (
-            f"✨ Leveling up every single day! {topic} ke sath apne goals ko crush karo. 🔥\n\n#trending #viral #explore"
-        ),
-        (
-            f"Consistency is the key. Agar aap bhi {topic} mein expert banna chahte hain toh save kar lo! 🚀\n\n#growth #contentcreator"
-        ),
-    ]
-    chosen_caption = random.choice(captions)
-
+  elif text == "💰 My Balance":
+    bal_row = get_user(user_id)
+    if bal_row:
+      bal = bal_row[0]
+      pts = bal_row[1]
+    else:
+      bal = 0.0
+      pts = 0
     bot.reply_to(
         message,
-        f"🤖 **Generated AI Caption & Hashtags:**\n\n`{chosen_caption}`\n\n*(Aap ise copy karke use kar sakte hain!)*",
+        f"👤 **User ID:** `{user_id}`\n💰 **Balance:** ₹{bal:.2f}\n⭐ **Points:**"
+        f" {pts} pts (100 pts = ₹1.5)",
         parse_mode="Markdown",
     )
-    clear_user_state(user_id)
-
-
-def is_user_pending_funds(user_id):
-    if user_id == ADMIN_ID:
-        return False
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
+  elif text == "📜 My Orders":
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT order_id, service_name, quantity, cost, date_time FROM orders"
+        " WHERE user_id = %s ORDER BY id DESC LIMIT 5",
+        (user_id,),
+    )
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    if not rows:
+      bot.reply_to(message, "📜 No orders found.")
+    else:
+      markup = types.InlineKeyboardMarkup()
+      for r in rows:
+        markup.add(
+            types.InlineKeyboardButton(
+                f"♻️ Refill ID: {r[0]}", callback_data=f"refillreq_{r[0]}"
+            )
         )
-        row = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return row is not None
-    except:
-        return False
+      msg = "📜 **Recent Orders & Refill Options:**\n\n" + "".join([
+          f"🆔 `{r[0]}` | {r[1]} | Qty: {r[2]} | ₹{r[3]}\n" for r in rows
+      ])
+      bot.reply_to(message, msg, parse_mode="Markdown", reply_markup=markup)
+  elif text == "💳 Add Funds (QR & UPI)":
+    ask_amount_logic(
+        message.chat.id, message.from_user.id, message.from_user.first_name
+    )
+  elif text == "🎁 Refer & Earn":
+    bot_info = bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
+
+    ref_text = (
+        f"🎁 **Refer & Earn Program** 🎁\n\n"
+        f"Apne dosto ko invite karein aur random **30 se 70 points** tak"
+        f" jeetein!\n"
+        f"Jaise hi aapke **100 points** honge, woh automatically **₹1.5** mein"
+        f" convert ho jayenge.\n\n"
+        f"🔗 **Aapki Unique Referral Link:**\n`{ref_link}`\n\n"
+        f"👇 Is link ko copy karke apne dosto ke sath share karein!"
+    )
+    bot.reply_to(message, ref_text, parse_mode="Markdown")
+  elif text == "🎁 Claim Free Trial":
+    freetrial_command(message)
+  elif text == "♻️ Request Refill":
+    bot.reply_to(
+        message,
+        "♻ **Auto-Refill Instructions:**\nApne `/myorders` ya status check"
+        " section mein jayenge toh wahan har order ke sath **'Request Refill'"
+        " ka button mil jayega, wahan se click karein!",
+        parse_mode="Markdown",
+    )
+  elif text == "🤖 AI Caption Generator":
+    user_order_state[user_id] = {"mode": "ai_caption"}
+    msg = bot.send_message(
+        message.chat.id,
+        "🤖 **AI Caption Generator**\nApne post ka topic ya niche likhein"
+        " (jaise: _gym motivation_ ya _travel vlog_):",
+        parse_mode="Markdown",
+    )
+    bot.register_next_step_handler(msg, process_ai_caption)
+  elif text == "🔑 Reseller API":
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT api_key FROM users WHERE user_id = %s", (user_id,))
+    row = cursor.fetchone()
+    apikey = row[0] if row else None
+
+    if not apikey:
+      import uuid
+
+      apikey = str(uuid.uuid4()).replace("-", "")
+      cursor.execute(
+          "UPDATE users SET api_key = %s WHERE user_id = %s", (apikey, user_id)
+      )
+      conn.commit()
+    cursor.close()
+    conn.close()
+
+    api_doc = (
+        f"🔑 **Smart Reseller API Panel**\n\n"
+        f"Aap apne SMM panel ya doosre bots ko is bot ke sath connect kar"
+        f" sakte hain:\n\n"
+        f"🌐 **API URL:** `{RENDER_URL}/api/v2`\n"
+        f"🔑 **Your API Key:** `{apikey}`\n\n"
+        "Supported actions: `services`, `add`, `status`"
+    )
+    bot.reply_to(message, api_doc, parse_mode="Markdown")
+  elif text == "📞 Support":
+    bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
+
+
+# ==================== AI CAPTION HANDLER ====================
+def process_ai_caption(message):
+  user_id = message.from_user.id
+  if message.text and any(btn in message.text for btn in MENU_BUTTONS):
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
+    return
+
+  topic = message.text.strip()
+  captions = [
+      (
+          f"✨ Leveling up every single day! `{topic}` ke sath apne goals ko"
+          " crush karo. 🔥\n\n#trending #viral #explore"
+          f" #{topic.replace(' ', '')}"
+      ),
+      (
+          f"Consistency is the key. Agar aap bhi `{topic}` mein expert banna"
+          " chahte hain toh save kar lo! 🚀\n\n#growth #contentcreator"
+          f" #{topic.replace(' ', '')}"
+      ),
+  ]
+  chosen_caption = random.choice(captions)
+
+  bot.reply_to(
+      message,
+      f"🤖 **Generated AI Caption & Hashtags:**\n\n`{chosen_caption}`\n\n*(Aap"
+      " ise copy karke use kar sakte hain!)*",
+      parse_mode="Markdown",
+  )
+  clear_user_state(user_id)
+
+
+# ==================== ROBUST DATABASE-BACKED PAYMENT PROOF HANDLER ====================
+def is_user_pending_funds(user_id):
+  if user_id == ADMIN_ID:
+    return False
+  try:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return row is not None
+  except:
+    return False
 
 
 @bot.message_handler(
@@ -1084,746 +1091,746 @@ def is_user_pending_funds(user_id):
     func=lambda message: is_user_pending_funds(message.from_user.id),
 )
 def handle_payment_proof_global(message):
-    user_id = message.from_user.id
+  user_id = message.from_user.id
 
-    if message.text and message.text in MENU_BUTTONS:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        handle_menu_buttons(message)
-        return
-
+  if message.text and message.text in MENU_BUTTONS:
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
-    )
-    row = cursor.fetchone()
-    amount_rs = row[0] if row else 50.0
-
     cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
     conn.commit()
     cursor.close()
     conn.close()
+    handle_menu_buttons(message)
+    return
 
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton(
-            "✅ Approve", callback_data=f"app_{user_id}_{amount_rs}"
-        ),
-        types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT amount FROM pending_funds WHERE user_id = %s", (user_id,)
+  )
+  row = cursor.fetchone()
+  amount_rs = row[0] if row else 50.0
+
+  cursor.execute("DELETE FROM pending_funds WHERE user_id = %s", (user_id,))
+  conn.commit()
+  cursor.close()
+  conn.close()
+
+  markup = types.InlineKeyboardMarkup(row_width=2)
+  markup.add(
+      types.InlineKeyboardButton(
+          "✅ Approve", callback_data=f"app_{user_id}_{amount_rs}"
+      ),
+      types.InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}"),
+  )
+
+  user_name = message.from_user.first_name or "User"
+  user_username = (
+      f"@{message.from_user.username}"
+      if message.from_user.username
+      else "No Username"
+  )
+
+  caption_text = (
+      f"🔔 **New Fund Request / Payment Proof!**\n\n"
+      f"👤 User: {user_name} (`{user_id}`)\n"
+      f"🔗 Username: {user_username}\n"
+      f"💰 Expected Amount: `₹{amount_rs}`\n\n"
+      f"Neeche diye gaye button par click karke balance approve karein:"
+  )
+
+  try:
+    if message.photo:
+      file_id = message.photo[-1].file_id
+      bot.send_photo(
+          ADMIN_ID,
+          photo=file_id,
+          caption=caption_text,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    else:
+      proof_text = message.text or "No text"
+      full_text = f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
+      bot.send_message(
+          ADMIN_ID, full_text, parse_mode="Markdown", reply_markup=markup
+      )
+
+    bot.reply_to(
+        message,
+        "✅ **Payment Proof Submitted!**\nAdmin ne aapka request check kar liya"
+        " hai, jald hi aapke wallet mein balance add ho jayega.",
+        parse_mode="Markdown",
     )
-
-    user_name = message.from_user.first_name or "User"
-    user_username = (
-        f"@{message.from_user.username}"
-        if message.from_user.username
-        else "No Username"
-    )
-
-    caption_text = (
-        f"🔔 **New Fund Request / Payment Proof!**\n\n"
-        f"👤 User: {user_name} (`{user_id}`)\n"
-        f"🔗 Username: {user_username}\n"
-        f"💰 Expected Amount: `₹{amount_rs}`\n\n"
-        f"Neeche diye gaye button par click karke balance approve karein:"
-    )
-
-    try:
-        if message.photo:
-            file_id = message.photo[-1].file_id
-            bot.send_photo(
-                ADMIN_ID,
-                photo=file_id,
-                caption=caption_text,
-                parse_mode="Markdown",
-                reply_markup=markup,
-            )
-        else:
-            proof_text = message.text or "No text"
-            full_text = f"{caption_text}\n💬 **Proof/UTR:** `{proof_text}`"
-            bot.send_message(
-                ADMIN_ID, full_text, parse_mode="Markdown", reply_markup=markup
-            )
-
-        bot.reply_to(
-            message,
-            "✅ **Payment Proof Submitted!**\nAdmin ne aapka request check kar liya hai, jald hi aapke wallet mein balance add ho jayega.",
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        print(f"❌ Admin notification error: {e}")
+  except Exception as e:
+    print(f"❌ Admin notification error: {e}")
 
 
+# ==================== CALLBACK QUERY LISTENER ====================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_listener(call):
-    chat_id = call.message.chat.id
-    user_id = call.from_user.id
+  chat_id = call.message.chat.id
+  user_id = call.from_user.id
 
-    if call.data.startswith("userdetail_"):
-        if user_id != ADMIN_ID:
-            bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
-            return
+  # 1. ADMIN - USER DETAILS VIEW (Ab yeh sabse upar hai taki turant trigger ho)
+  if call.data.startswith("userdetail_"):
+    if user_id != ADMIN_ID:
+      bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
+      return
 
-        try:
-            target_user_id = int(call.data.split("_")[1])
-        except ValueError:
-            bot.answer_callback_query(call.id, "Invalid User ID!", show_alert=True)
-            return
+    try:
+      target_user_id = int(call.data.split("_")[1])
+    except ValueError:
+      bot.answer_callback_query(call.id, "Invalid User ID!", show_alert=True)
+      return
 
-        user_row = get_user(target_user_id)
-        if not user_row:
-            bot.answer_callback_query(call.id, "User database mein nahi mila!", show_alert=True)
-            return
+    user_row = get_user(target_user_id)
+    if not user_row:
+      bot.answer_callback_query(call.id, "User database mein nahi mila!", show_alert=True)
+      return
 
-        balance = user_row[0]
-        points = user_row[1]
+    balance = user_row[0]
+    points = user_row[1]
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT order_id, service_name, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
-            (target_user_id,),
-        )
-        user_orders = cursor.fetchall()
-        cursor.close()
-        conn.close()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT order_id, service_name, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
+        (target_user_id,),
+    )
+    user_orders = cursor.fetchall()
+    cursor.close()
+    conn.close()
 
-        total_orders_count = len(user_orders)
+    total_orders_count = len(user_orders)
 
-        details_text = f"👤 **USER DETAILS**\n"
-        details_text += f"━━━━━━━━━━━━━━━━━━\n"
-        details_text += f"🆔 **User ID:** `{target_user_id}`\n"
-        details_text += f"💰 **Wallet Balance:** ₹{balance:.2f}\n"
-        details_text += f"⭐ **Points:** {points}\n"
-        details_text += f"📦 **Total Orders Placed:** {total_orders_count}\n\n"
+    details_text = f"👤 **USER DETAILS**\n"
+    details_text += f"━━━━━━━━━━━━━━━━━━\n"
+    details_text += f"🆔 **User ID:** `{target_user_id}`\n"
+    details_text += f"💰 **Wallet Balance:** ₹{balance:.2f}\n"
+    details_text += f"⭐ **Points:** {points}\n"
+    details_text += f"📦 **Total Orders Placed:** {total_orders_count}\n\n"
 
-        if total_orders_count > 0:
-            details_text += f"🛒 **Recent Orders (Last 5):**\n"
-            for i, order in enumerate(user_orders[:5], 1):
-                s_id, s_name, qty, cost, d_time = order
-                details_text += f"\n{i}. **{s_name}** (ID: `{s_id}`)\n"
-                details_text += f"   • Qty: {qty} | Cost: ₹{cost}\n"
-                details_text += f"   • Date: {d_time}\n"
-        else:
-            details_text += "📦 **Recent Orders:** Is user ne abhi tak koi order nahi lagaya."
+    if total_orders_count > 0:
+      details_text += f"🛒 **Recent Orders (Last 5):**\n"
+      for i, order in enumerate(user_orders[:5], 1):
+        s_id, s_name, qty, cost, d_time = order
+        details_text += f"\n{i}. **{s_name}** (ID: `{s_id}`)\n"
+        details_text += f"   • Qty: {qty} | Cost: ₹{cost}\n"
+        details_text += f"   • Date: {d_time}\n"
+    else:
+      details_text += "📦 **Recent Orders:** Is user ne abhi tak koi order nahi lagaya."
 
-        back_markup = types.InlineKeyboardMarkup()
-        back_markup.add(
-            types.InlineKeyboardButton("❌ Close Details", callback_data="close_details")
-        )
+    back_markup = types.InlineKeyboardMarkup()
+    back_markup.add(
+        types.InlineKeyboardButton("❌ Close Details", callback_data="close_details")
+    )
 
-        bot.edit_message_text(
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=details_text,
+        parse_mode="Markdown",
+        reply_markup=back_markup,
+    )
+    return
+
+  # 2. CLOSE DETAILS BUTTON
+  if call.data == "close_details":
+    try:
+      bot.delete_message(chat_id, call.message.message_id)
+    except:
+      pass
+    return
+
+  # 3. CHECK ORDER STATUS
+  if call.data.startswith("chkstatus_"):
+    order_id = call.data.replace("chkstatus_", "")
+    bot.answer_callback_query(call.id, "Fetching live status...")
+    check_and_send_status(chat_id, user_id, order_id, is_reply=False)
+    return
+
+  # 4. REFILL REQUEST
+  if call.data.startswith("refillreq_"):
+    order_id = call.data.replace("refillreq_", "")
+    try:
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "INSERT INTO refills (order_id, user_id, status) VALUES (%s, %s,"
+          " 'Pending')",
+          (order_id, user_id),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
+
+      bot.answer_callback_query(
+          call.id,
+          "♻️ Refill request successfully submitted to provider!",
+          show_alert=True,
+      )
+      bot.send_message(
+          ADMIN_ID,
+          f"♻️ **New Refill Request!**\nOrder ID: `{order_id}`\nUser ID:"
+          f" `{user_id}`",
+          parse_mode="Markdown",
+      )
+    except Exception as e:
+      bot.answer_callback_query(call.id, f"Error: {str(e)}", show_alert=True)
+    return
+
+  # 5. APPROVE / REJECT PAYMENT
+  if call.data.startswith("app_") or call.data.startswith("rej_"):
+    if user_id != ADMIN_ID:
+      bot.answer_callback_query(
+          call.id, "❌ Aap admin nahi hain!", show_alert=True
+      )
+      return
+
+    parts = call.data.split("_")
+    action = parts[0]
+    target_user_id = int(parts[1])
+
+    if action == "app":
+      amount = float(parts[2])
+      register_user(target_user_id)
+      update_balance(target_user_id, amount)
+
+      try:
+        bot.edit_message_caption(
             chat_id=chat_id,
             message_id=call.message.message_id,
-            text=details_text,
+            caption=(
+                f"{call.message.caption}\n\n"
+                f"✅ **STATUS: APPROVED** (₹{amount} Added)"
+            ),
             parse_mode="Markdown",
-            reply_markup=back_markup,
+            reply_markup=None,
         )
-        return
-
-    if call.data == "close_details":
+      except:
         try:
-            bot.delete_message(chat_id, call.message.message_id)
+          bot.edit_message_text(
+              chat_id=chat_id,
+              message_id=call.message.message_id,
+              text=(
+                  f"{call.message.text}\n\n✅ **STATUS: APPROVED** (₹{amount}"
+                  " Added)"
+              ),
+              parse_mode="Markdown",
+              reply_markup=None,
+          )
         except:
-            pass
-        return
+          pass
 
-    if call.data.startswith("chkstatus_"):
-        order_id = call.data.replace("chkstatus_", "")
-        bot.answer_callback_query(call.id, "Fetching live status...")
-        check_and_send_status(chat_id, user_id, order_id, is_reply=False)
-        return
+      bot.answer_callback_query(call.id, f"Successfully added ₹{amount}!")
 
-    if call.data.startswith("refillreq_"):
-        order_id = call.data.replace("refillreq_", "")
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO refills (order_id, user_id, status) VALUES (%s, %s, 'Pending')",
-                (order_id, user_id),
-            )
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-            bot.answer_callback_query(
-                call.id,
-                "♻️ Refill request successfully submitted to provider!",
-                show_alert=True,
-            )
-            bot.send_message(
-                ADMIN_ID,
-                f"♻️ **New Refill Request!**\nOrder ID: `{order_id}`\nUser ID: `{user_id}`",
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            bot.answer_callback_query(call.id, f"Error: {str(e)}", show_alert=True)
-        return
-
-    if call.data.startswith("app_") or call.data.startswith("rej_"):
-        if user_id != ADMIN_ID:
-            bot.answer_callback_query(
-                call.id, "❌ Aap admin nahi hain!", show_alert=True
-            )
-            return
-
-        parts = call.data.split("_")
-        action = parts[0]
-        target_user_id = int(parts[1])
-
-        if action == "app":
-            amount = float(parts[2])
-            register_user(target_user_id)
-            update_balance(target_user_id, amount)
-
-            try:
-                bot.edit_message_caption(
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    caption=(
-                        f"{call.message.caption}\n\n✅ **STATUS: APPROVED** (₹{amount} Added)"
-                    ),
-                    parse_mode="Markdown",
-                    reply_markup=None,
-                )
-            except:
-                try:
-                    bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=call.message.message_id,
-                        text=(
-                            f"{call.message.text}\n\n✅ **STATUS: APPROVED** (₹{amount} Added)"
-                        ),
-                        parse_mode="Markdown",
-                        reply_markup=None,
-                    )
-                except:
-                    pass
-
-            bot.answer_callback_query(call.id, f"Successfully added ₹{amount}!")
-
-            try:
-                bot.send_message(
-                    target_user_id,
-                    f"🎉 **Payment Approved!**\nAdmin ne aapka payment verify kar liya hai. Aapke wallet mein `₹{amount}` add kar diye gaye hain!",
-                    parse_mode="Markdown",
-                )
-            except:
-                pass
-
-        elif action == "rej":
-            try:
-                bot.edit_message_caption(
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    caption=f"{call.message.caption}\n\n❌ **STATUS: REJECTED**",
-                    parse_mode="Markdown",
-                    reply_markup=None,
-                )
-            except:
-                try:
-                    bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=call.message.message_id,
-                        text=f"{call.message.text}\n\n❌ **STATUS: REJECTED**",
-                        parse_mode="Markdown",
-                        reply_markup=None,
-                    )
-                except:
-                    pass
-
-            bot.answer_callback_query(call.id, "Payment rejected!")
-
-            try:
-                bot.send_message(
-                    target_user_id,
-                    "❌ **Payment Rejected:** Aapka payment proof invalid ya match nahi hua. Kripya support se contact karein.",
-                    parse_mode="Markdown",
-                )
-            except:
-                pass
-        return
-
-    if call.data.startswith("plat_"):
-        bot.answer_callback_query(call.id, "Loading services...")
-
-        parts = call.data.split("_")
-        page = int(parts[-1])
-        platform_name = "_".join(parts[1:-1])
-
-        services = get_cached_smm_services()
-        matched_services = []
-
-        for s in services:
-            cat = s.get("category", "").lower()
-            name = s.get("name", "").lower()
-            match = False
-
-            if platform_name == "ig_followers":
-                if ("instagram" in cat or "ig" in cat or "instagram" in name) and (
-                    "follower" in cat or "followers" in name
-                ):
-                    match = True
-            elif platform_name == "instagram":
-                if ("instagram" in cat or "ig" in cat or "instagram" in name) and not (
-                    "follower" in cat or "followers" in name
-                ):
-                    match = True
-            elif platform_name == "telegram":
-                if "telegram" in cat or "tg" in cat or "telegram" in name:
-                    match = True
-            elif platform_name == "youtube":
-                if "youtube" in cat or "yt" in cat or "youtube" in name:
-                    match = True
-            elif platform_name == "facebook":
-                if "facebook" in cat or "fb" in cat or "facebook" in name:
-                    match = True
-            elif platform_name == "twitter":
-                if (
-                    "twitter" in cat
-                    or "x.com" in cat
-                    or "twitter" in name
-                    or "x followers" in name
-                ):
-                    match = True
-            elif platform_name == "whatsapp":
-                if "whatsapp" in cat or "wa" in cat or "whatsapp" in name:
-                    match = True
-
-            if match:
-                matched_services.append(s)
-
-        if not matched_services:
-            bot.edit_message_text(
-                "❌ Is category mein koi service nahi mili. Kripya dusri category try karein.",
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                parse_mode="Markdown",
-            )
-            return
-
-        ITEMS_PER_PAGE = 5
-        total_services = len(matched_services)
-        total_pages = (total_services + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-
-        if page >= total_pages:
-            page = total_pages - 1
-        if page < 0:
-            page = 0
-
-        start_idx = page * ITEMS_PER_PAGE
-        end_idx = start_idx + ITEMS_PER_PAGE
-        current_services = matched_services[start_idx:end_idx]
-
-        list_text = f"📋 *{platform_name.upper()} SERVICES LIST* (Page {page+1}/{total_pages}) 📋\n\n```text\n"
-
-        markup = types.InlineKeyboardMarkup()
-        buttons = []
-
-        for idx, s in enumerate(current_services, start=start_idx + 1):
-            s_name = s.get("name", "")
-            s_cat = s.get("category", "")
-            selling_price = calculate_selling_price(s.get("rate", 0), s_name, s_cat)
-            service_id = str(s.get("service"))
-
-            list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
-
-            buttons.append(
-                types.InlineKeyboardButton(
-                    f"🛒 #{idx} (ID: {service_id})", callback_data=f"srv_{service_id}"
-                )
-            )
-
-        list_text += "```\n👇 *Service select karein ya page badlein:*"
-
-        for btn in buttons:
-            markup.add(btn)
-
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(
-                types.InlineKeyboardButton(
-                    "⬅️ Prev", callback_data=f"plat_{platform_name}_{page-1}"
-                )
-            )
-        if page < total_pages - 1:
-            nav_buttons.append(
-                types.InlineKeyboardButton(
-                    "Next ➡️", callback_data=f"plat_{platform_name}_{page+1}"
-                )
-            )
-
-        if nav_buttons:
-            markup.row(*nav_buttons)
-
-        try:
-            bot.edit_message_text(
-                list_text,
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                parse_mode="Markdown",
-                reply_markup=markup,
-            )
-        except Exception:
-            bot.send_message(
-                chat_id,
-                list_text,
-                parse_mode="Markdown",
-                reply_markup=markup,
-            )
-
-    elif call.data.startswith("srv_"):
-        service_id = call.data.replace("srv_", "")
-        bot.answer_callback_query(call.id)
-        user_order_state[user_id] = {"service_id": service_id}
-
-        msg = bot.send_message(
-            chat_id,
-            "🔗 **Ab apna Link bhejein** (jahan followers/likes/views chahiye):",
+      try:
+        bot.send_message(
+            target_user_id,
+            f"🎉 **Payment Approved!**\nAdmin ne aapka payment verify kar liya"
+            f" hai. Aapke wallet mein `₹{amount}` add kar diye gaye hain!",
             parse_mode="Markdown",
         )
-        bot.register_next_step_handler(msg, process_order_link)
+      except:
+        pass
+
+    elif action == "rej":
+      try:
+        bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            caption=f"{call.message.caption}\n\n❌ **STATUS: REJECTED**",
+            parse_mode="Markdown",
+            reply_markup=None,
+        )
+      except:
+        try:
+          bot.edit_message_text(
+              chat_id=chat_id,
+              message_id=call.message.message_id,
+              text=f"{call.message.text}\n\n❌ **STATUS: REJECTED**",
+              parse_mode="Markdown",
+              reply_markup=None,
+          )
+        except:
+          pass
+
+      bot.answer_callback_query(call.id, "Payment rejected!")
+
+      try:
+        bot.send_message(
+            target_user_id,
+            "❌ **Payment Rejected:** Aapka payment proof invalid ya match nahi"
+            " hua. Kripya support se contact karein.",
+            parse_mode="Markdown",
+        )
+      except:
+        pass
+    return
+
+  # 6. PLATFORM CATEGORY NAVIGATION
+  if call.data.startswith("plat_"):
+    bot.answer_callback_query(call.id, "Loading services...")
+
+    parts = call.data.split("_")
+    page = int(parts[-1])
+    platform_name = "_".join(parts[1:-1])
+
+    services = get_cached_smm_services()
+    matched_services = []
+
+    for s in services:
+      cat = s.get("category", "").lower()
+      name = s.get("name", "").lower()
+      match = False
+
+      if platform_name == "ig_followers":
+        if (
+            "instagram" in cat or "ig" in cat or "instagram" in name
+        ) and ("follower" in cat or "followers" in name):
+          match = True
+      elif platform_name == "instagram":
+        if (
+            "instagram" in cat or "ig" in cat or "instagram" in name
+        ) and not ("follower" in cat or "followers" in name):
+          match = True
+      elif platform_name == "telegram":
+        if "telegram" in cat or "tg" in cat or "telegram" in name:
+          match = True
+      elif platform_name == "youtube":
+        if "youtube" in cat or "yt" in cat or "youtube" in name:
+          match = True
+      elif platform_name == "facebook":
+        if "facebook" in cat or "fb" in cat or "facebook" in name:
+          match = True
+      elif platform_name == "twitter":
+        if (
+            "twitter" in cat
+            or "x.com" in cat
+            or "twitter" in name
+            or "x followers" in name
+        ):
+          match = True
+      elif platform_name == "whatsapp":
+        if "whatsapp" in cat or "wa" in cat or "whatsapp" in name:
+          match = True
+
+      if match:
+        matched_services.append(s)
+
+    if not matched_services:
+      bot.edit_message_text(
+          "❌ Is category mein koi service nahi mili. Kripya dusri category try"
+          " karein.",
+          chat_id=chat_id,
+          message_id=call.message.message_id,
+          parse_mode="Markdown",
+      )
+      return
+
+    ITEMS_PER_PAGE = 5
+    total_services = len(matched_services)
+    total_pages = (total_services + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+    if page >= total_pages:
+      page = total_pages - 1
+    if page < 0:
+      page = 0
+
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    current_services = matched_services[start_idx:end_idx]
+
+    list_text = f"📋 *{platform_name.upper()} SERVICES LIST* (Page {page+1}/{total_pages}) 📋\n\n```text\n"
+
+    markup = types.InlineKeyboardMarkup()
+    buttons = []
+
+    for idx, s in enumerate(current_services, start=start_idx + 1):
+      s_name = s.get("name", "")
+      s_cat = s.get("category", "")
+      selling_price = calculate_selling_price(
+          s.get("rate", 0), s_name, s_cat
+      )
+      service_id = str(s.get("service"))
+
+      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
+
+      buttons.append(
+          types.InlineKeyboardButton(
+              f"🛒 #{idx} (ID: {service_id})", callback_data=f"srv_{service_id}"
+          )
+      )
+
+    list_text += "```\n👇 *Service select karein ya page badlein:*"
+
+    for btn in buttons:
+      markup.add(btn)
+
+    nav_buttons = []
+    if page > 0:
+      nav_buttons.append(
+          types.InlineKeyboardButton(
+              "⬅️ Prev", callback_data=f"plat_{platform_name}_{page-1}"
+          )
+      )
+    if page < total_pages - 1:
+      nav_buttons.append(
+          types.InlineKeyboardButton(
+              "Next ➡️", callback_data=f"plat_{platform_name}_{page+1}"
+          )
+      )
+
+    if nav_buttons:
+      markup.row(*nav_buttons)
+
+    try:
+      bot.edit_message_text(
+          list_text,
+          chat_id=chat_id,
+          message_id=call.message.message_id,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    except Exception:
+      bot.send_message(
+          chat_id,
+          list_text,
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+
+  # 7. SERVICE SELECT HANDLER
+  elif call.data.startswith("srv_"):
+    service_id = call.data.replace("srv_", "")
+    bot.answer_callback_query(call.id)
+    user_order_state[user_id] = {"service_id": service_id}
+
+    msg = bot.send_message(
+        chat_id,
+        "🔗 **Ab apna Link bhejein** (jahan followers/likes/views chahiye):",
+        parse_mode="Markdown",
+    )
+    bot.register_next_step_handler(msg, process_order_link)
 
 
 def process_order_link(message):
-    user_id = message.from_user.id
-    if message.text and message.text in MENU_BUTTONS:
-        clear_user_state(user_id)
-        handle_menu_buttons(message)
-        return
+  user_id = message.from_user.id
+  if message.text and message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
+    return
 
-    if (
-        user_id not in user_order_state
-        or "service_id" not in user_order_state[user_id]
-    ):
-        bot.reply_to(message, "❌ Session expired. Dobara start karein.")
-        return
+  if (
+      user_id not in user_order_state
+      or "service_id" not in user_order_state[user_id]
+  ):
+    bot.reply_to(message, "❌ Session expired. Dobara start karein.")
+    return
 
-    user_order_state[user_id]["link"] = message.text.strip()
-    msg = bot.send_message(
-        message.chat.id,
-        "📊 **Quantity kitni chahiye?** (Number me likhein, jaise: 1000)",
-        parse_mode="Markdown",
-    )
-    bot.register_next_step_handler(msg, process_order_quantity)
+  user_order_state[user_id]["link"] = message.text.strip()
+  msg = bot.send_message(
+      message.chat.id,
+      "📊 **Quantity kitni chahiye?** (Number me likhein, jaise: 1000)",
+      parse_mode="Markdown",
+  )
+  bot.register_next_step_handler(msg, process_order_quantity)
 
 
 def process_order_quantity(message):
-    user_id = message.from_user.id
-    if message.text and message.text in MENU_BUTTONS:
-        clear_user_state(user_id)
-        handle_menu_buttons(message)
-        return
+  user_id = message.from_user.id
+  if message.text and message.text in MENU_BUTTONS:
+    clear_user_state(user_id)
+    handle_menu_buttons(message)
+    return
 
-    if (
-        user_id not in user_order_state
-        or "service_id" not in user_order_state[user_id]
-    ):
-        bot.reply_to(message, "❌ Session expired. Dobara start karein.")
-        return
+  if (
+      user_id not in user_order_state
+      or "service_id" not in user_order_state[user_id]
+  ):
+    bot.reply_to(message, "❌ Session expired. Dobara start karein.")
+    return
 
-    try:
-        quantity = int(message.text.strip())
-        if quantity <= 0:
-            bot.reply_to(message, "❌ Quantity 0 se zyada honi chahiye.")
-            return
+  try:
+    quantity = int(message.text.strip())
+    if quantity <= 0:
+      bot.reply_to(message, "❌ Quantity 0 se zyada honi chahiye.")
+      return
 
-        state = user_order_state[user_id]
-        service_id = state["service_id"]
-        link = state["link"]
+    state = user_order_state[user_id]
+    service_id = state["service_id"]
+    link = state["link"]
 
-        services = get_cached_smm_services()
-        selected_service = None
-        for s in services:
-            if str(s.get("service")) == str(service_id):
-                selected_service = s
-                break
+    services = get_cached_smm_services()
+    selected_service = None
+    for s in services:
+      if str(s.get("service")) == str(service_id):
+        selected_service = s
+        break
 
-        if not selected_service:
-            bot.reply_to(message, "❌ Selected service not found.")
-            clear_user_state(user_id)
-            return
+    if not selected_service:
+      bot.reply_to(message, "❌ Selected service not found.")
+      clear_user_state(user_id)
+      return
 
-        wholesale_rate = float(selected_service.get("rate", 0))
-        s_name = selected_service.get("name", "")
-        s_cat = selected_service.get("category", "")
-        unit_selling_price = calculate_selling_price(wholesale_rate, s_name, s_cat)
-        total_cost = round((unit_selling_price * quantity) / 1000.0, 2)
+    wholesale_rate = float(selected_service.get("rate", 0))
+    s_name = selected_service.get("name", "")
+    s_cat = selected_service.get("category", "")
+    unit_selling_price = calculate_selling_price(
+        wholesale_rate, s_name, s_cat
+    )
+    total_cost = round((unit_selling_price * quantity) / 1000.0, 2)
 
-        user_row = get_user(user_id)
-        current_balance = user_row[0] if user_row else 0.0
+    user_row = get_user(user_id)
+    current_balance = user_row[0] if user_row else 0.0
 
-        if current_balance < total_cost:
-            bot.reply_to(
-                message,
-                f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour Balance: ₹{current_balance:.2f}\n\nPehle Funds Add karein.",
-                parse_mode="Markdown",
-            )
-            clear_user_state(user_id)
-            return
+    if current_balance < total_cost:
+      bot.reply_to(
+          message,
+          f"❌ **Insufficient Balance!**\nRequired: ₹{total_cost}\nYour"
+          f" Balance: ₹{current_balance:.2f}\n\nPehle Funds Add karein.",
+          parse_mode="Markdown",
+      )
+      clear_user_state(user_id)
+      return
 
-        smm_payload = {
-            "key": SMM_API_KEY,
-            "action": "add",
-            "service": service_id,
-            "link": link,
-            "quantity": quantity,
-        }
-        smm_resp = requests.post(SMM_API_URL, data=smm_payload, timeout=10)
-        smm_data = smm_resp.json()
+    smm_payload = {
+        "key": SMM_API_KEY,
+        "action": "add",
+        "service": service_id,
+        "link": link,
+        "quantity": quantity,
+    }
+    smm_resp = requests.post(SMM_API_URL, data=smm_payload, timeout=10)
+    smm_data = smm_resp.json()
 
-        if "order" in smm_data:
-            smm_order_id = str(smm_data["order"])
-            update_balance(user_id, -total_cost)
+    if "order" in smm_data:
+      smm_order_id = str(smm_data["order"])
+      update_balance(user_id, -total_cost)
 
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO orders (order_id, user_id, service_name, link, quantity, cost, date_time) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (
-                    smm_order_id,
-                    user_id,
-                    selected_service.get("name"),
-                    link,
-                    quantity,
-                    total_cost,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                ),
-            )
-            conn.commit()
-            cursor.close()
-            conn.close()
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "INSERT INTO orders (order_id, user_id, service_name, link, quantity,"
+          " cost, date_time) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+          (
+              smm_order_id,
+              user_id,
+              selected_service.get("name"),
+              link,
+              quantity,
+              total_cost,
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+          ),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
 
-            markup = types.InlineKeyboardMarkup()
-            markup.row(
-                types.InlineKeyboardButton(
-                    "🔍 Check Live Status", callback_data=f"chkstatus_{smm_order_id}"
-                ),
-                types.InlineKeyboardButton(
-                    "♻ Request Refill", callback_data=f"refillreq_{smm_order_id}"
-                ),
-            )
+      markup = types.InlineKeyboardMarkup()
+      markup.row(
+          types.InlineKeyboardButton(
+              "🔍 Check Live Status", callback_data=f"chkstatus_{smm_order_id}"
+          ),
+          types.InlineKeyboardButton(
+              "♻ Request Refill", callback_data=f"refillreq_{smm_order_id}"
+          ),
+      )
 
-            bot.reply_to(
-                message,
-                f"✅ **Order Placed Successfully!**\n\n🆔 Order ID: `{smm_order_id}`\n📦 Service: `{selected_service.get('name')}`\n🔗 Link: `{link}`\n📊 Quantity: `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance: `₹{current_balance - total_cost:.2f}`",
-                parse_mode="Markdown",
-                reply_markup=markup,
-            )
+      bot.reply_to(
+          message,
+          f"✅ **Order Placed Successfully!**\n\n🆔 Order ID:"
+          f" `{smm_order_id}`\n📦 Service:"
+          f" `{selected_service.get('name')}`\n🔗 Link: `{link}`\n📊 Quantity:"
+          f" `{quantity}`\n💰 Cost: `₹{total_cost}`\n📉 Remaining Balance:"
+          f" `₹{current_balance - total_cost:.2f}`",
+          parse_mode="Markdown",
+          reply_markup=markup,
+      )
+    else:
+      error_msg = smm_data.get("error", "Unknown SMM Error")
+      bot.reply_to(
+          message,
+          f"❌ **SMM Panel Error:**\n`{error_msg}`",
+          parse_mode="Markdown",
+      )
 
-            user_name = message.from_user.first_name or "N/A"
-            user_username = message.from_user.username or "No Username"
-            notify_admin_new_order(
-                user_id,
-                smm_order_id,
-                selected_service.get("name"),
-                link,
-                quantity,
-                total_cost,
-                current_balance - total_cost,
-                user_name,
-                user_username,
-            )
-        else:
-            error_msg = smm_data.get("error", "Unknown SMM Error")
-            bot.reply_to(
-                message,
-                f"❌ **SMM Panel Error:**\n`{error_msg}`",
-                parse_mode="Markdown",
-            )
+    clear_user_state(user_id)
 
-        clear_user_state(user_id)
-
-    except ValueError:
-        bot.reply_to(message, "❌ Kripya valid number dalein (jaise: 500 ya 1000).")
+  except ValueError:
+    bot.reply_to(
+        message, "❌ Kripya valid number dalein (jaise: 500 ya 1000)."
+    )
 
 
 # ==================== FLASK API & WEBHOOK ROUTES ====================
 @app.route("/")
 def home():
-    return "Bot is running via Webhook!"
+  return "Bot is running via Webhook!"
 
 
 @app.route("/api/v2", methods=["POST"])
 def reseller_api_v2():
-    api_key = request.form.get("key") or request.json.get("key")
-    action = request.form.get("action") or request.json.get("action")
+  api_key = request.form.get("key") or request.json.get("key")
+  action = request.form.get("action") or request.json.get("action")
 
-    if not api_key:
-        return jsonify({"error": "API key is missing"}), 400
+  if not api_key:
+    return json.dumps({"error": "API key is missing"}), 400
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT user_id, balance FROM users WHERE api_key = %s", (api_key,)
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT user_id, balance FROM users WHERE api_key = %s", (api_key,)
+  )
+  user_row = cursor.fetchone()
+  cursor.close()
+  conn.close()
+
+  if not user_row:
+    return json.dumps({"error": "Invalid API key"}), 403
+
+  user_id, balance = user_row
+
+  if action == "services":
+    services = get_cached_smm_services()
+    formatted = []
+    for s in services:
+      s_name = s.get("name", "")
+      s_cat = s.get("category", "")
+      rate = calculate_selling_price(s.get("rate", 0), s_name, s_cat)
+      formatted.append({
+          "service": s.get("service"),
+          "name": s_name,
+          "category": s_cat,
+          "rate": rate,
+          "min": s.get("min"),
+          "max": s.get("max"),
+      })
+    return json.dumps(formatted), 200
+
+  elif action == "balance":
+    return json.dumps({"balance": balance, "currency": "INR"}), 200
+
+  elif action == "add":
+    service_id = request.form.get("service") or request.json.get("service")
+    link = request.form.get("link") or request.json.get("link")
+    quantity = request.form.get("quantity") or request.json.get("quantity")
+
+    if not service_id or not link or not quantity:
+      return json.dumps({"error": "Missing required parameters"}), 400
+
+    try:
+      quantity = int(quantity)
+    except:
+      return json.dumps({"error": "Invalid quantity"}), 400
+
+    services = get_cached_smm_services()
+    selected_service = None
+    for s in services:
+      if str(s.get("service")) == str(service_id):
+        selected_service = s
+        break
+
+    if not selected_service:
+      return json.dumps({"error": "Service not found"}), 400
+
+    wholesale_rate = float(selected_service.get("rate", 0))
+    unit_price = calculate_selling_price(
+        wholesale_rate,
+        selected_service.get("name"),
+        selected_service.get("category"),
     )
-    user_row = cursor.fetchone()
-    cursor.close()
-    conn.close()
+    total_cost = round((unit_price * quantity) / 1000.0, 2)
 
-    if not user_row:
-        return jsonify({"error": "Invalid API key"}), 403
+    if balance < total_cost:
+      return json.dumps({"error": "Insufficient balance"}), 400
 
-    user_id, balance = user_row
+    smm_payload = {
+        "key": SMM_API_KEY,
+        "action": "add",
+        "service": service_id,
+        "link": link,
+        "quantity": quantity,
+    }
+    smm_resp = requests.post(SMM_API_URL, data=smm_payload, timeout=10)
+    smm_data = smm_resp.json()
 
-    if action == "services":
-        services = get_cached_smm_services()
-        formatted = []
-        for s in services:
-            s_name = s.get("name", "")
-            s_cat = s.get("category", "")
-            rate = calculate_selling_price(s.get("rate", 0), s_name, s_cat)
-            formatted.append({
-                "service": s.get("service"),
-                "name": s_name,
-                "category": s_cat,
-                "rate": rate,
-                "min": s.get("min"),
-                "max": s.get("max"),
-            })
-        return jsonify(formatted), 200
+    if "order" in smm_data:
+      smm_order_id = str(smm_data["order"])
+      update_balance(user_id, -total_cost)
 
-    elif action == "balance":
-        return jsonify({"balance": balance, "currency": "INR"}), 200
+      conn = get_db_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "INSERT INTO orders (order_id, user_id, service_name, link, quantity,"
+          " cost, date_time) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+          (
+              smm_order_id,
+              user_id,
+              selected_service.get("name"),
+              link,
+              quantity,
+              total_cost,
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+          ),
+      )
+      conn.commit()
+      cursor.close()
+      conn.close()
 
-    elif action == "add":
-        service_id = request.form.get("service") or request.json.get("service")
-        link = request.form.get("link") or request.json.get("link")
-        quantity = request.form.get("quantity") or request.json.get("quantity")
+      return json.dumps({"order": smm_order_id}), 200
+    else:
+      return (
+          json.dumps(
+              {"error": smm_data.get("error", "Failed to place order")}
+          ),
+          400,
+      )
 
-        if not service_id or not link or not quantity:
-            return jsonify({"error": "Missing required parameters"}), 400
+  elif action == "status":
+    order_id = request.form.get("order") or request.json.get("order")
+    if not order_id:
+        return json.dumps({"error": "Order ID is missing"}), 400
 
-        try:
-            quantity = int(quantity)
-        except:
-            return jsonify({"error": "Invalid quantity"}), 400
+    payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
+    response = requests.post(SMM_API_URL, data=payload, timeout=10)
+    return response.text, 200
 
-        services = get_cached_smm_services()
-        selected_service = None
-        for s in services:
-            if str(s.get("service")) == str(service_id):
-                selected_service = s
-                break
-
-        if not selected_service:
-            return jsonify({"error": "Service not found"}), 400
-
-        wholesale_rate = float(selected_service.get("rate", 0))
-        unit_price = calculate_selling_price(
-            wholesale_rate,
-            selected_service.get("name"),
-            selected_service.get("category"),
-        )
-        total_cost = round((unit_price * quantity) / 1000.0, 2)
-
-        if balance < total_cost:
-            return jsonify({"error": "Insufficient balance"}), 400
-
-        smm_payload = {
-            "key": SMM_API_KEY,
-            "action": "add",
-            "service": service_id,
-            "link": link,
-            "quantity": quantity,
-        }
-        smm_resp = requests.post(SMM_API_URL, data=smm_payload, timeout=10)
-        smm_data = smm_resp.json()
-
-        if "order" in smm_data:
-            smm_order_id = str(smm_data["order"])
-            update_balance(user_id, -total_cost)
-
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO orders (order_id, user_id, service_name, link, quantity, cost, date_time) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (
-                    smm_order_id,
-                    user_id,
-                    selected_service.get("name"),
-                    link,
-                    quantity,
-                    total_cost,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                ),
-            )
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-            rem_balance = balance - total_cost
-            notify_admin_new_order(
-                user_id,
-                smm_order_id,
-                selected_service.get("name"),
-                link,
-                quantity,
-                total_cost,
-                rem_balance,
-                "API User",
-                "Reseller_API",
-            )
-
-            return jsonify({"order": smm_order_id}), 200
-        else:
-            return (
-                jsonify({"error": smm_data.get("error", "Failed to place order")}),
-                400,
-            )
-
-    elif action == "status":
-        order_id = request.form.get("order") or request.json.get("order")
-        if not order_id:
-            return jsonify({"error": "Order ID is missing"}), 400
-
-        payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
-        response = requests.post(SMM_API_URL, data=payload, timeout=10)
-        return response.text, 200, {"Content-Type": "application/json"}
-
-    return jsonify({"error": "Invalid action"}), 400
+  return json.dumps({"error": "Invalid action"}), 400
 
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
-    if request.headers.get("content-type") == "application/json":
-        json_string = request.get_data().decode("utf-8")
-        update = types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return "OK", 200
-    else:
-        return "Forbidden", 403
+  if request.headers.get("content-type") == "application/json":
+    json_string = request.get_data().decode("utf-8")
+    update = types.Update.de_json(json_string)
+    bot.process_new_updates([update])
+    return "OK", 200
+  else:
+    return "Forbidden", 403
 
 
 def keep_alive():
-    while True:
-        try:
-            requests.get(RENDER_URL, timeout=5)
-        except:
-            pass
-        time.sleep(300)
-
-
-def setup_bot_webhook():
+  while True:
     try:
-        bot.remove_webhook()
-        time.sleep(1)
-        webhook_url = f"{RENDER_URL}/{BOT_TOKEN}"
-        bot.set_webhook(url=webhook_url)
-        print(f"Webhook successfully configured to: {webhook_url}")
-    except Exception as e:
-        print(f"Webhook setup error: {e}")
+      requests.get(RENDER_URL, timeout=5)
+    except:
+      pass
+    time.sleep(300)
 
 
-threading.Thread(target=fetch_services_background, daemon=True).start()
-threading.Thread(target=keep_alive, daemon=True).start()
-threading.Thread(target=setup_bot_webhook, daemon=True).start()
+# ==================== WEBHOOK & THREAD AUTO-SETUP ====================
+with app.app_context():
+  threading.Thread(target=fetch_services_background, daemon=True).start()
+  threading.Thread(target=keep_alive, daemon=True).start()
+  try:
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+    print(f"Webhook successfully configured to: {RENDER_URL}/{BOT_TOKEN}")
+  except Exception as e:
+    print(f"Webhook setup error: {e}")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run("0.0.0.0", port)
+  port = int(os.environ.get("PORT", 10000))
+  app.run("0.0.0.0", port)
