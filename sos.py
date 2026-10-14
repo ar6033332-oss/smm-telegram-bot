@@ -1586,7 +1586,7 @@ def process_order_link(message):
   msg = bot.send_message(
       message.chat.id,
       "📊 **Quantity kitni chahiye?** (Number me likhein, jaise: 1000)",
-      parse_Mode="Markdown",
+      parse_mode="Markdown",
   )
   bot.register_next_step_handler(msg, process_order_quantity)
 
