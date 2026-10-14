@@ -174,14 +174,14 @@ def get_cached_smm_services():
   if not cached_services:
     try:
       response = requests.post(
-          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=4
+          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=5
       )
       if response.status_code == 200:
         res_data = response.json()
-        if isinstance(res_data, list):
+        if isinstance(res_data, list) and len(res_data) > 0:
           cached_services = res_data
-    except:
-      pass
+    except Exception as e:
+      print("Instant fetch error:", e)
   return cached_services
 
 
@@ -933,18 +933,25 @@ def handle_menu_buttons(message):
 
   elif text == "🏷 Sasti Services (Cheapest)":
     services = get_cached_smm_services()
-    cheapest_matches = []
-
-    for s in services:
-      s_name = s.get("name", "")
-      s_cat = s.get("category", "")
-      selling_price = calculate_selling_price(
-          s.get("rate", 0), s_name, s_cat
+    if not services:
+      bot.reply_to(
+          message, "❌ Filhal services load nahi ho pa rahi hain, kripya thodi der baad try karein."
       )
+      return
 
-      s_copy = dict(s)
-      s_copy["calculated_price"] = selling_price
-      cheapest_matches.append(s_copy)
+    cheapest_matches = []
+    for s in services:
+      try:
+        s_name = s.get("name", "")
+        s_cat = s.get("category", "")
+        raw_rate = s.get("rate", 0)
+        selling_price = calculate_selling_price(raw_rate, s_name, s_cat)
+
+        s_copy = dict(s)
+        s_copy["calculated_price"] = float(selling_price)
+        cheapest_matches.append(s_copy)
+      except Exception as ex:
+        continue
 
     if not cheapest_matches:
       bot.reply_to(
@@ -952,10 +959,8 @@ def handle_menu_buttons(message):
       )
       return
 
-    # Price ke hisaab se lowest (sasti) se highest sort karke top 10 lenge
-    cheapest_matches = sorted(
-        cheapest_matches, key=lambda x: x["calculated_price"]
-    )
+    # Price ke hisaab se robust sorting (Lowest to Highest)
+    cheapest_matches.sort(key=lambda x: x.get("calculated_price", 999999.0))
     top_cheapest = cheapest_matches[:10]
 
     list_text = "🏷 *TOP 10 CHEAPEST SERVICES* 🏷\n\n```text\n"
@@ -966,10 +971,10 @@ def handle_menu_buttons(message):
       selling_price = s.get("calculated_price", 0.0)
       service_id = str(s.get("service"))
 
-      list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
+      list_text += f"{idx}. ID:{service_id} | ₹{selling_price:.2f}/1K\n   {s_name}\n\n"
       markup.add(
           types.InlineKeyboardButton(
-              f"🛒 #{idx} (ID: {service_id} - ₹{selling_price})",
+              f"🛒 #{idx} (ID: {service_id} - ₹{selling_price:.2f})",
               callback_data=f"srv_{service_id}",
           )
       )
