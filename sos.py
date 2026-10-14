@@ -42,7 +42,6 @@ cached_services = []
 MENU_BUTTONS = [
     "🛍 Select Platform",
     "🔥 Trending Services",
-    "🏷 Sasti Services (Cheapest)",
     "💰 My Balance",
     "📜 My Orders",
     "💳 Add Funds (QR & UPI)",
@@ -174,14 +173,14 @@ def get_cached_smm_services():
   if not cached_services:
     try:
       response = requests.post(
-          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=5
+          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=4
       )
       if response.status_code == 200:
         res_data = response.json()
-        if isinstance(res_data, list) and len(res_data) > 0:
+        if isinstance(res_data, list):
           cached_services = res_data
-    except Exception as e:
-      print("Instant fetch error:", e)
+    except:
+      pass
   return cached_services
 
 
@@ -286,7 +285,6 @@ def main_menu(user_id):
   markup.add(
       types.KeyboardButton("🛍 Select Platform"),
       types.KeyboardButton("🔥 Trending Services"),
-      types.KeyboardButton("🏷 Sasti Services (Cheapest)"),
       types.KeyboardButton("💰 My Balance"),
       types.KeyboardButton("📜 My Orders"),
       types.KeyboardButton("💳 Add Funds (QR & UPI)"),
@@ -920,62 +918,6 @@ def handle_menu_buttons(message):
       markup.add(
           types.InlineKeyboardButton(
               f"🛒 #{idx} (ID: {service_id})", callback_data=f"srv_{service_id}"
-          )
-      )
-
-    list_text += "```\n👇 *Service select karne ke liye button dabayein:*"
-    bot.send_message(
-        message.chat.id,
-        list_text,
-        parse_mode="Markdown",
-        reply_markup=markup,
-    )
-
-  elif text == "🏷 Sasti Services (Cheapest)":
-    services = get_cached_smm_services()
-    if not services:
-      bot.reply_to(
-          message, "❌ Filhal services load nahi ho pa rahi hain, kripya thodi der baad try karein."
-      )
-      return
-
-    cheapest_matches = []
-    for s in services:
-      try:
-        s_name = s.get("name", "")
-        s_cat = s.get("category", "")
-        raw_rate = s.get("rate", 0)
-        selling_price = calculate_selling_price(raw_rate, s_name, s_cat)
-
-        s_copy = dict(s)
-        s_copy["calculated_price"] = float(selling_price)
-        cheapest_matches.append(s_copy)
-      except Exception as ex:
-        continue
-
-    if not cheapest_matches:
-      bot.reply_to(
-          message, "❌ Filhal koi sasti services available nahi hain."
-      )
-      return
-
-    # Price ke hisaab se robust sorting (Lowest to Highest)
-    cheapest_matches.sort(key=lambda x: x.get("calculated_price", 999999.0))
-    top_cheapest = cheapest_matches[:10]
-
-    list_text = "🏷 *TOP 10 CHEAPEST SERVICES* 🏷\n\n```text\n"
-    markup = types.InlineKeyboardMarkup()
-
-    for idx, s in enumerate(top_cheapest, start=1):
-      s_name = s.get("name", "")
-      selling_price = s.get("calculated_price", 0.0)
-      service_id = str(s.get("service"))
-
-      list_text += f"{idx}. ID:{service_id} | ₹{selling_price:.2f}/1K\n   {s_name}\n\n"
-      markup.add(
-          types.InlineKeyboardButton(
-              f"🛒 #{idx} (ID: {service_id} - ₹{selling_price:.2f})",
-              callback_data=f"srv_{service_id}",
           )
       )
 
