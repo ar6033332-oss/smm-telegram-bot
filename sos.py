@@ -280,7 +280,17 @@ def clear_user_state(user_id):
 
 
 # Helper function to notify admin on new order
-def notify_admin_new_order(user_id, order_id, service_name, link, quantity, cost, new_balance, user_name="N/A", user_username="N/A"):
+def notify_admin_new_order(
+    user_id,
+    order_id,
+    service_name,
+    link,
+    quantity,
+    cost,
+    new_balance,
+    user_name="N/A",
+    user_username="N/A",
+):
   try:
     admin_msg = (
         f"🚨 **NEW ORDER PLACED!** 🚨\n\n"
@@ -296,7 +306,11 @@ def notify_admin_new_order(user_id, order_id, service_name, link, quantity, cost
         f"📉 **Remaining Balance:** `₹{new_balance:.2f}`"
     )
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔍 Check Status", callback_data=f"chkstatus_{order_id}"))
+    markup.add(
+        types.InlineKeyboardButton(
+            "🔍 Check Status", callback_data=f"chkstatus_{order_id}"
+        )
+    )
     bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown", reply_markup=markup)
   except Exception as e:
     print(f"Failed to notify admin: {e}")
@@ -907,6 +921,7 @@ def handle_menu_buttons(message):
   elif text == "🔥 Trending Services":
     services = get_cached_smm_services()
     trending_matches = []
+
     for s in services:
       name = s.get("name", "").lower()
       cat = s.get("category", "").lower()
@@ -916,9 +931,15 @@ def handle_menu_buttons(message):
           or "view" in name
           or "like" in name
       ):
-        trending_matches.append(s)
-        if len(trending_matches) >= 10:
-          break
+        s_name = s.get("name", "")
+        s_cat = s.get("category", "")
+        selling_price = calculate_selling_price(
+            s.get("rate", 0), s_name, s_cat
+        )
+
+        s_copy = dict(s)
+        s_copy["calculated_price"] = selling_price
+        trending_matches.append(s_copy)
 
     if not trending_matches:
       bot.reply_to(
@@ -926,21 +947,25 @@ def handle_menu_buttons(message):
       )
       return
 
-    list_text = "🔥 *TOP TRENDING & BEST SERVICES* 🔥\n\n```text\n"
+    # Sort by cheapest/lowest price first
+    trending_matches = sorted(
+        trending_matches, key=lambda x: x["calculated_price"]
+    )
+    top_cheapest_trending = trending_matches[:10]
+
+    list_text = "🔥 *TOP 10 CHEAPEST TRENDING SERVICES* 🔥\n\n```text\n"
     markup = types.InlineKeyboardMarkup()
 
-    for idx, s in enumerate(trending_matches, start=1):
+    for idx, s in enumerate(top_cheapest_trending, start=1):
       s_name = s.get("name", "")
-      s_cat = s.get("category", "")
-      selling_price = calculate_selling_price(
-          s.get("rate", 0), s_name, s_cat
-      )
+      selling_price = s.get("calculated_price", 0.0)
       service_id = str(s.get("service"))
 
       list_text += f"{idx}. ID:{service_id} | ₹{selling_price}/1K\n   {s_name}\n\n"
       markup.add(
           types.InlineKeyboardButton(
-              f"🛒 #{idx} (ID: {service_id})", callback_data=f"srv_{service_id}"
+              f"🛒 #{idx} (ID: {service_id} - ₹{selling_price})",
+              callback_data=f"srv_{service_id}",
           )
       )
 
@@ -1677,7 +1702,17 @@ def process_order_quantity(message):
       # ADMIN NOTIFICATION CALL
       user_name = message.from_user.first_name or "N/A"
       user_username = message.from_user.username or "No Username"
-      notify_admin_new_order(user_id, smm_order_id, selected_service.get('name'), link, quantity, total_cost, rem_balance, user_name, user_username)
+      notify_admin_new_order(
+          user_id,
+          smm_order_id,
+          selected_service.get("name"),
+          link,
+          quantity,
+          total_cost,
+          rem_balance,
+          user_name,
+          user_username,
+      )
 
     else:
       error_msg = smm_data.get("error", "Unknown SMM Error")
@@ -1812,7 +1847,17 @@ def reseller_api_v2():
 
       # API Order Admin Notification
       rem_balance = balance - total_cost
-      notify_admin_new_order(user_id, smm_order_id, selected_service.get('name'), link, quantity, total_cost, rem_balance, "API User", "Reseller_API")
+      notify_admin_new_order(
+          user_id,
+          smm_order_id,
+          selected_service.get("name"),
+          link,
+          quantity,
+          total_cost,
+          rem_balance,
+          "API User",
+          "Reseller_API",
+      )
 
       return json.dumps({"order": smm_order_id}), 200
     else:
@@ -1826,7 +1871,7 @@ def reseller_api_v2():
   elif action == "status":
     order_id = request.form.get("order") or request.json.get("order")
     if not order_id:
-        return json.dumps({"error": "Order ID is missing"}), 400
+      return json.dumps({"error": "Order ID is missing"}), 400
 
     payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
     response = requests.post(SMM_API_URL, data=payload, timeout=10)
