@@ -4,7 +4,7 @@ import os
 import random
 import threading
 import time
-from flask import Flask, abort, request
+from flask import Flask, abort, jsonify, request
 import psycopg2
 import requests
 import telebot
@@ -262,7 +262,6 @@ def clear_user_state(user_id):
         del user_order_state[user_id]
 
 
-# Helper function to notify admin on new order
 def notify_admin_new_order(
     user_id,
     order_id,
@@ -417,7 +416,6 @@ def start_handler(message):
         print("Start Handler Error:", e)
 
 
-# ==================== ADMIN USERS PANEL BUTTON HANDLER ====================
 @bot.message_handler(func=lambda message: message.text == "👑 View All Users")
 def handle_admin_users_button(message):
     if message.from_user.id != ADMIN_ID:
@@ -917,7 +915,6 @@ def handle_menu_buttons(message):
             )
             return
 
-        # Srif sabse sasti (cheapest) services ko low-to-high sort karke top 10 lenge
         trending_matches = sorted(
             trending_matches, key=lambda x: x["calculated_price"]
         )
@@ -1046,7 +1043,6 @@ def handle_menu_buttons(message):
         bot.send_message(message.chat.id, f"🤝 **Support:** {ADMIN_USERNAME}")
 
 
-# ==================== AI CAPTION HANDLER ====================
 def process_ai_caption(message):
     user_id = message.from_user.id
     if message.text and any(btn in message.text for btn in MENU_BUTTONS):
@@ -1073,7 +1069,6 @@ def process_ai_caption(message):
     clear_user_state(user_id)
 
 
-# ==================== ROBUST DATABASE-BACKED PAYMENT PROOF HANDLER ====================
 def is_user_pending_funds(user_id):
     if user_id == ADMIN_ID:
         return False
@@ -1170,13 +1165,11 @@ def handle_payment_proof_global(message):
         print(f"❌ Admin notification error: {e}")
 
 
-# ==================== CALLBACK QUERY LISTENER ====================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_listener(call):
     chat_id = call.message.chat.id
     user_id = call.from_user.id
 
-    # 1. ADMIN - USER DETAILS VIEW
     if call.data.startswith("userdetail_"):
         if user_id != ADMIN_ID:
             bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
@@ -1239,7 +1232,6 @@ def callback_listener(call):
         )
         return
 
-    # 2. CLOSE DETAILS BUTTON
     if call.data == "close_details":
         try:
             bot.delete_message(chat_id, call.message.message_id)
@@ -1247,14 +1239,12 @@ def callback_listener(call):
             pass
         return
 
-    # 3. CHECK ORDER STATUS
     if call.data.startswith("chkstatus_"):
         order_id = call.data.replace("chkstatus_", "")
         bot.answer_callback_query(call.id, "Fetching live status...")
         check_and_send_status(chat_id, user_id, order_id, is_reply=False)
         return
 
-    # 4. REFILL REQUEST
     if call.data.startswith("refillreq_"):
         order_id = call.data.replace("refillreq_", "")
         try:
@@ -1282,7 +1272,6 @@ def callback_listener(call):
             bot.answer_callback_query(call.id, f"Error: {str(e)}", show_alert=True)
         return
 
-    # 5. APPROVE / REJECT PAYMENT
     if call.data.startswith("app_") or call.data.startswith("rej_"):
         if user_id != ADMIN_ID:
             bot.answer_callback_query(
@@ -1367,7 +1356,6 @@ def callback_listener(call):
                 pass
         return
 
-    # 6. PLATFORM CATEGORY NAVIGATION
     if call.data.startswith("plat_"):
         bot.answer_callback_query(call.id, "Loading services...")
 
@@ -1496,7 +1484,6 @@ def callback_listener(call):
                 reply_markup=markup,
             )
 
-    # 7. SERVICE SELECT HANDLER
     elif call.data.startswith("srv_"):
         service_id = call.data.replace("srv_", "")
         bot.answer_callback_query(call.id)
@@ -1638,7 +1625,6 @@ def process_order_quantity(message):
                 reply_markup=markup,
             )
 
-            # ADMIN NOTIFICATION CALL
             user_name = message.from_user.first_name or "N/A"
             user_username = message.from_user.username or "No Username"
             notify_admin_new_order(
@@ -1679,7 +1665,7 @@ def reseller_api_v2():
     action = request.form.get("action") or request.json.get("action")
 
     if not api_key:
-        return json.dumps({"error": "API key is missing"}), 400
+        return jsonify({"error": "API key is missing"}), 400
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1691,7 +1677,7 @@ def reseller_api_v2():
     conn.close()
 
     if not user_row:
-        return json.dumps({"error": "Invalid API key"}), 403
+        return jsonify({"error": "Invalid API key"}), 403
 
     user_id, balance = user_row
 
@@ -1710,10 +1696,10 @@ def reseller_api_v2():
                 "min": s.get("min"),
                 "max": s.get("max"),
             })
-        return json.dumps(formatted), 200
+        return jsonify(formatted), 200
 
     elif action == "balance":
-        return json.dumps({"balance": balance, "currency": "INR"}), 200
+        return jsonify({"balance": balance, "currency": "INR"}), 200
 
     elif action == "add":
         service_id = request.form.get("service") or request.json.get("service")
@@ -1721,12 +1707,12 @@ def reseller_api_v2():
         quantity = request.form.get("quantity") or request.json.get("quantity")
 
         if not service_id or not link or not quantity:
-            return json.dumps({"error": "Missing required parameters"}), 400
+            return jsonify({"error": "Missing required parameters"}), 400
 
         try:
             quantity = int(quantity)
         except:
-            return json.dumps({"error": "Invalid quantity"}), 400
+            return jsonify({"error": "Invalid quantity"}), 400
 
         services = get_cached_smm_services()
         selected_service = None
@@ -1736,7 +1722,7 @@ def reseller_api_v2():
                 break
 
         if not selected_service:
-            return json.dumps({"error": "Service not found"}), 400
+            return jsonify({"error": "Service not found"}), 400
 
         wholesale_rate = float(selected_service.get("rate", 0))
         unit_price = calculate_selling_price(
@@ -1747,7 +1733,7 @@ def reseller_api_v2():
         total_cost = round((unit_price * quantity) / 1000.0, 2)
 
         if balance < total_cost:
-            return json.dumps({"error": "Insufficient balance"}), 400
+            return jsonify({"error": "Insufficient balance"}), 400
 
         smm_payload = {
             "key": SMM_API_KEY,
@@ -1781,7 +1767,6 @@ def reseller_api_v2():
             cursor.close()
             conn.close()
 
-            # API Order Admin Notification
             rem_balance = balance - total_cost
             notify_admin_new_order(
                 user_id,
@@ -1795,25 +1780,23 @@ def reseller_api_v2():
                 "Reseller_API",
             )
 
-            return json.dumps({"order": smm_order_id}), 200
+            return jsonify({"order": smm_order_id}), 200
         else:
             return (
-                json.dumps(
-                    {"error": smm_data.get("error", "Failed to place order")}
-                ),
+                jsonify({"error": smm_data.get("error", "Failed to place order")}),
                 400,
             )
 
     elif action == "status":
         order_id = request.form.get("order") or request.json.get("order")
         if not order_id:
-            return json.dumps({"error": "Order ID is missing"}), 400
+            return jsonify({"error": "Order ID is missing"}), 400
 
         payload = {"key": SMM_API_KEY, "action": "status", "order": order_id}
         response = requests.post(SMM_API_URL, data=payload, timeout=10)
-        return response.text, 200
+        return response.text, 200, {"Content-Type": "application/json"}
 
-  return json.dumps({"error": "Invalid action"}), 400
+    return jsonify({"error": "Invalid action"}), 400
 
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
@@ -1836,7 +1819,6 @@ def keep_alive():
         time.sleep(300)
 
 
-# ==================== WEBHOOK & THREAD AUTO-SETUP ====================
 def setup_bot_webhook():
     try:
         bot.remove_webhook()
