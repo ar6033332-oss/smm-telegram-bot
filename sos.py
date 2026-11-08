@@ -42,7 +42,6 @@ cached_services = []
 MENU_BUTTONS = [
     "🛍 Select Platform",
     "🔥 Trending Services",
-    "🏷 Sasti Services (Cheapest)",
     "💰 My Balance",
     "📜 My Orders",
     "💳 Add Funds (QR & UPI)",
@@ -174,14 +173,14 @@ def get_cached_smm_services():
   if not cached_services:
     try:
       response = requests.post(
-          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=5
+          SMM_API_URL, data={"key": SMM_API_KEY, "action": "services"}, timeout=4
       )
       if response.status_code == 200:
         res_data = response.json()
-        if isinstance(res_data, list) and len(res_data) > 0:
+        if isinstance(res_data, list):
           cached_services = res_data
-    except Exception as e:
-      print("Instant fetch error:", e)
+    except:
+      pass
   return cached_services
 
 
@@ -286,7 +285,6 @@ def main_menu(user_id):
   markup.add(
       types.KeyboardButton("🛍 Select Platform"),
       types.KeyboardButton("🔥 Trending Services"),
-      types.KeyboardButton("🏷 Sasti Services (Cheapest)"),
       types.KeyboardButton("💰 My Balance"),
       types.KeyboardButton("📜 My Orders"),
       types.KeyboardButton("💳 Add Funds (QR & UPI)"),
@@ -931,62 +929,6 @@ def handle_menu_buttons(message):
         reply_markup=markup,
     )
 
-  elif text == "🏷 Sasti Services (Cheapest)":
-    services = get_cached_smm_services()
-    if not services:
-      bot.reply_to(
-          message, "❌ Filhal services load nahi ho pa rahi hain, kripya thodi der baad try karein."
-      )
-      return
-
-    cheapest_matches = []
-    for s in services:
-      try:
-        s_name = s.get("name", "")
-        s_cat = s.get("category", "")
-        raw_rate = s.get("rate", 0)
-        selling_price = calculate_selling_price(raw_rate, s_name, s_cat)
-
-        s_copy = dict(s)
-        s_copy["calculated_price"] = float(selling_price)
-        cheapest_matches.append(s_copy)
-      except Exception as ex:
-        continue
-
-    if not cheapest_matches:
-      bot.reply_to(
-          message, "❌ Filhal koi sasti services available nahi hain."
-      )
-      return
-
-    # Har category/type mein se sabse sasti services pick karne ka smart logic
-    cheapest_matches.sort(key=lambda x: x.get("calculated_price", 999999.0))
-    top_cheapest = cheapest_matches[:12]
-
-    list_text = "🏷 *ALL CATEGORIES TOP CHEAPEST SERVICES* 🏷\n\n```text\n"
-    markup = types.InlineKeyboardMarkup()
-
-    for idx, s in enumerate(top_cheapest, start=1):
-      s_name = s.get("name", "")
-      selling_price = s.get("calculated_price", 0.0)
-      service_id = str(s.get("service"))
-
-      list_text += f"{idx}. ID:{service_id} | ₹{selling_price:.2f}/1K\n   {s_name}\n\n"
-      markup.add(
-          types.InlineKeyboardButton(
-              f"🛒 #{idx} (ID: {service_id} - ₹{selling_price:.2f})",
-              callback_data=f"srv_{service_id}",
-          )
-      )
-
-    list_text += "```\n👇 *Service select karne ke liye button dabayein:*"
-    bot.send_message(
-        message.chat.id,
-        list_text,
-        parse_mode="Markdown",
-        reply_markup=markup,
-    )
-
   elif text == "💰 My Balance":
     bal_row = get_user(user_id)
     if bal_row:
@@ -1230,7 +1172,7 @@ def callback_listener(call):
   chat_id = call.message.chat.id
   user_id = call.from_user.id
 
-  # 1. ADMIN - ALL USER DETAILS & FULL ORDERS VIEW
+  # 1. ADMIN - USER DETAILS VIEW (Ab yeh sabse upar hai taki turant trigger ho)
   if call.data.startswith("userdetail_"):
     if user_id != ADMIN_ID:
       bot.answer_callback_query(call.id, "Unauthorized!", show_alert=True)
@@ -1253,7 +1195,7 @@ def callback_listener(call):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT order_id, service_name, link, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
+        "SELECT order_id, service_name, quantity, cost, date_time FROM orders WHERE user_id = %s ORDER BY id DESC",
         (target_user_id,),
     )
     user_orders = cursor.fetchall()
@@ -1262,32 +1204,27 @@ def callback_listener(call):
 
     total_orders_count = len(user_orders)
 
-    details_text = f"👤 **FULL USER DETAILS & ALL ORDERS**\n"
-    details_text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    details_text = f"👤 **USER DETAILS**\n"
+    details_text += f"━━━━━━━━━━━━━━━━━━\n"
     details_text += f"🆔 **User ID:** `{target_user_id}`\n"
     details_text += f"💰 **Wallet Balance:** ₹{balance:.2f}\n"
     details_text += f"⭐ **Points:** {points}\n"
     details_text += f"📦 **Total Orders Placed:** {total_orders_count}\n\n"
 
     if total_orders_count > 0:
-      details_text += f"🛒 **ALL PLACED ORDERS LIST:**\n"
-      for i, order in enumerate(user_orders, 1):
-        s_id, s_name, o_link, qty, cost, d_time = order
-        details_text += f"\n{i}. **{s_name}**\n"
-        details_text += f"   • 🆔 Order ID: `{s_id}`\n"
-        details_text += f"   • 🔗 Link: `{o_link}`\n"
-        details_text += f"   • 📊 Qty: {qty} | 💰 Cost: ₹{cost}\n"
-        details_text += f"   • 📅 Date: {d_time}\n"
+      details_text += f"🛒 **Recent Orders (Last 5):**\n"
+      for i, order in enumerate(user_orders[:5], 1):
+        s_id, s_name, qty, cost, d_time = order
+        details_text += f"\n{i}. **{s_name}** (ID: `{s_id}`)\n"
+        details_text += f"   • Qty: {qty} | Cost: ₹{cost}\n"
+        details_text += f"   • Date: {d_time}\n"
     else:
-      details_text += "📦 **Orders:** Is user ne abhi tak koi order nahi lagaya."
+      details_text += "📦 **Recent Orders:** Is user ne abhi tak koi order nahi lagaya."
 
     back_markup = types.InlineKeyboardMarkup()
     back_markup.add(
         types.InlineKeyboardButton("❌ Close Details", callback_data="close_details")
     )
-
-    if len(details_text) > 4000:
-      details_text = details_text[:3900] + "\n\n⚠️ *(List lambi hone ke karan baki orders cut hue hain...)*"
 
     bot.edit_message_text(
         chat_id=chat_id,
